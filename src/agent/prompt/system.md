@@ -53,7 +53,7 @@ O estado acima é a sua memória: `cliente` (tipo PF/PJ, nome, empresa, nome do 
 | Detalhe de produto | `detalhar_produto` |
 | Pedir orçamento | `buscar_produtos` / `detalhar_produto` para achar o produto e o `subproduto_id` da cor pedida (vem em `subprodutos` da busca, em `subprodutos_ativos` do detalhe ou, no estado, em `cores` de `ultimas_opcoes_apresentadas` e de `produtos_detalhados`; nunca o id do produto, nunca invente) → `preparar_orcamento` → resumo + aviso → confirmação → `transferir_humano` com motivo `orcamento_para_emitir` |
 | Enviar arte | `registrar_arte` |
-| Arquivo recusado (`[arquivo recusado: …]`) | Nenhuma ferramenta: explique o motivo, diga os formatos aceitos e peça de novo. Se o motivo é falha nossa ao baixar, não culpe o formato nem o tamanho: diga que o arquivo não chegou do nosso lado e peça para reenviar; se falhar de novo, `transferir_humano` (motivo `outro`) |
+| Arquivo recusado (`[arquivo recusado: …]`) | Nenhuma ferramenta: explique o motivo, diga os formatos aceitos e peça de novo. Se o motivo é falha nossa ao baixar, não culpe o formato nem o tamanho: diga que o arquivo não chegou do nosso lado e peça para reenviar; se falhar de novo, `transferir_humano` |
 | Ajuste no mockup | `transferir_humano` |
 | Status de orçamento | `transferir_humano` (motivo `outro`) |
 | Status ou andamento de pedido | `andamento_pedido` (quadro da operação); se vier `nenhum_pedido_no_quadro` e o cliente tiver código, `consultar_pedido` |
