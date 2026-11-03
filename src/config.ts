@@ -91,6 +91,8 @@ export const config = {
     parearTelefone: (process.env.WHATSAPP_PAREAR_TELEFONE ?? "").replace(/\D/g, ""),
     versaoWeb: process.env.WHATSAPP_WEB_VERSAO ?? "",
     liberados: digitos(process.env.WHATSAPP_LIBERADOS),
+    /** Modo da Lia escolhido no CRM (ligada/teste/desligada). Sem o arquivo, vale WHATSAPP_LIBERADOS. */
+    modoLiaArquivo: process.env.LIA_MODO_ARQUIVO ?? "data/lia-modo.json",
     artesDir: process.env.ARTES_DIR ?? "data/artes",
     loteSilencioMs: int(process.env.LOTE_SILENCIO_MS, 5_000),
     loteMaxMs: int(process.env.LOTE_MAX_MS, 30_000),
@@ -100,5 +102,14 @@ export const config = {
     avisoInstabilidadeMin: int(process.env.AVISO_INSTABILIDADE_MIN, 10),
     enviosPorMinuto: int(process.env.ENVIOS_POR_MINUTO, 20),
     varreduraMs: int(process.env.VARREDURA_MS, 120_000),
+    /** Vazio = Chrome que o puppeteer baixou. Preencha só se quiser outro (ex.: o Chrome instalado no Mac). */
+    chromePath: process.env.WHATSAPP_CHROME_PATH ?? "",
+  },
+  /** Integração com o CRM (pasta crm/). Sem CRM_URL e segredo, a ponte funciona como antes, sem painel web. */
+  crm: {
+    url: (process.env.CRM_URL ?? "").replace(/\/+$/, ""),
+    segredo: process.env.CRM_INTEGRATION_SECRET ?? "",
+    /** Porta do servidor de controle da ponte (QR, status, envio) que o CRM chama. */
+    controlePorta: int(process.env.PONTE_CONTROLE_PORTA, 3040),
   },
 };

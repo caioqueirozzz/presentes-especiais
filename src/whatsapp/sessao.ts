@@ -25,8 +25,23 @@ const SAUDE_INTERVALO_MS = 5 * 60_000;
 const BATIMENTO_INTERVALO_MS = 2 * 60_000;
 const VERSOES_REMOTAS = "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html";
 
+export type EstadoConexao = "INICIANDO" | "QR" | "AUTENTICANDO" | "CONECTADO" | "RECONECTANDO" | "DESVINCULADO";
+
+/** O que o painel de conexão do CRM mostra (GET /status do controle). */
+export interface SituacaoConexao {
+  estado: EstadoConexao;
+  /** Texto do QR (o CRM desenha a imagem); só existe no estado QR. */
+  qr: string | null;
+  telefone: string | null;
+  nome: string | null;
+  conectadoEm: string | null;
+  ultimoErro: string | null;
+}
+
 export interface OpcoesSessao {
   sessaoDir: string;
+  /** Chrome a usar. Vazio = o Chrome que o puppeteer baixou (~/.cache/puppeteer). */
+  chromePath?: string;
   parearTelefone?: string;
   versaoWeb?: string;
   log: LogPonte;
@@ -54,6 +69,11 @@ export class CanalWwebjs implements CanalWhatsApp {
   private meuLid = "";
   private readonly telefonesPorLid = new Map<string, string>();
   private readonly digitandoAte = new Map<string, ReturnType<typeof setTimeout>>();
+  private estado: EstadoConexao = "INICIANDO";
+  private qrAtual: string | null = null;
+  private meuNome: string | null = null;
+  private conectadoEm: string | null = null;
+  private ultimoErro: string | null = null;
 
   constructor(private readonly opcoes: OpcoesSessao) {
     this.versoes = opcoes.versaoWeb ? [opcoes.versaoWeb, undefined] : [undefined];
@@ -71,14 +91,64 @@ export class CanalWwebjs implements CanalWhatsApp {
     return this.meuWid;
   }
 
+  situacao(): SituacaoConexao {
+    return {
+      estado: this.estado,
+      qr: this.estado === "QR" ? this.qrAtual : null,
+      telefone: this.meuTelefone || null,
+      nome: this.meuNome,
+      conectadoEm: this.conectadoEm,
+      ultimoErro: this.ultimoErro,
+    };
+  }
+
+  /**
+   * Desvincula o aparelho atual (logout apaga a sessão salva) e abre de novo para mostrar um QR novo.
+   * É o "Conectar outro número" / "Gerar novo QR" do CRM.
+   */
+  async novaVinculacao(): Promise<void> {
+    if (this.reconectando) return;
+    this.reconectando = true;
+    this.estado = "INICIANDO";
+    this.qrAtual = null;
+    try {
+      const antigo = this.cliente;
+      this.cliente = null;
+      if (antigo) {
+        await comPrazo(antigo.logout(), 15_000).catch(() => {});
+        await comPrazo(antigo.destroy(), 10_000).catch(() => {});
+      }
+      this.meuWid = this.meuTelefone = this.meuLid = "";
+      this.meuNome = this.conectadoEm = null;
+      this.saude = novoEstadoSaude();
+      await this.lancar();
+    } catch (err) {
+      this.ultimoErro = String(err);
+      this.opcoes.log({ type: "nova_vinculacao_falhou", erro: String(err) });
+    } finally {
+      this.reconectando = false;
+    }
+  }
+
+  /** Envio pedido pelo CRM. Devolve o id da mensagem (o eco que volta pela ponte tem o mesmo id). */
+  async enviarTexto(telefone: string, texto: string): Promise<string> {
+    const cliente = this.exigirCliente();
+    // getNumberId resolve o nono dígito e diz se o número tem WhatsApp
+    const numero = await cliente.getNumberId(telefone.replace(/\D/g, ""));
+    if (!numero) throw new Error("Este número não tem WhatsApp.");
+    const enviada = await cliente.sendMessage(numero._serialized, texto, { sendSeen: false });
+    if (!enviada) throw new Error("O WhatsApp não confirmou o envio.");
+    return enviada.id._serialized;
+  }
+
   async iniciar(): Promise<void> {
     await this.lancar();
     this.instalarVigias();
   }
 
   async enviar(chatId: string, texto: string): Promise<void> {
-    // Sem sendSeen: false a biblioteca marca a conversa como lida a cada envio; e-mail no texto virava prévia de site.
-    const enviada = await this.exigirCliente().sendMessage(chatId, texto, { sendSeen: false, linkPreview: false });
+    // Sem sendSeen: false a biblioteca marca a conversa como lida a cada envio.
+    const enviada = await this.exigirCliente().sendMessage(chatId, texto, { sendSeen: false });
     // A biblioteca resolve vazio, sem lançar, quando não acha a conversa.
     if (!enviada) throw new Error(`WhatsApp não encontrou a conversa ${chatId}`);
   }
@@ -88,7 +158,7 @@ export class CanalWwebjs implements CanalWhatsApp {
     this.encerrando = true;
     const cliente = this.cliente;
     this.cliente = null;
-    if (cliente) await this.derrubar(cliente);
+    if (cliente) await comPrazo(cliente.destroy(), 10_000).catch(() => {});
   }
 
   async digitando(chatId: string, duracaoMs = DIGITANDO_MAX_MS): Promise<void> {
@@ -124,13 +194,7 @@ export class CanalWwebjs implements CanalWhatsApp {
       const chatId = chat.id._serialized;
       if (chat.isGroup || chat.unreadCount <= 0 || !ehConversaDireta(chatId)) continue;
       const recentes = await chat.fetchMessages({ limit: chat.unreadCount, fromMe: false });
-      // Uma mensagem que não converte não pode derrubar a varredura das outras.
-      const convertidas = await Promise.allSettled(naoLidasDoCliente(recentes, chat.unreadCount).map((m) => this.converter(m)));
-      const mensagens: MensagemRecebida[] = [];
-      for (const c of convertidas) {
-        if (c.status === "fulfilled") mensagens.push(c.value);
-        else this.opcoes.log({ type: "mensagem_nao_convertida", erro: String(c.reason) });
-      }
+      const mensagens = await Promise.all(naoLidasDoCliente(recentes, chat.unreadCount).map((m) => this.converter(m)));
       if (mensagens.length > 0) resultado.push({ chatId, mensagens });
     }
     return resultado;
@@ -145,7 +209,11 @@ export class CanalWwebjs implements CanalWhatsApp {
     const versao = this.versoes[this.indiceVersao];
     const cliente = new Client({
       authStrategy: new LocalAuth({ dataPath: this.opcoes.sessaoDir, clientId: "presentes-especiais" }),
-      puppeteer: { headless: true, executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", args: ["--no-sandbox", "--disable-dev-shm-usage"] },
+      puppeteer: {
+        headless: true,
+        ...(this.opcoes.chromePath ? { executablePath: this.opcoes.chromePath } : {}),
+        args: ["--no-sandbox", "--disable-dev-shm-usage"],
+      },
       ...(versao
         ? { webVersion: versao, webVersionCache: { type: "remote" as const, remotePath: VERSOES_REMOTAS, strict: false } }
         : {}),
@@ -167,6 +235,8 @@ export class CanalWwebjs implements CanalWhatsApp {
 
     cliente.on("qr", (qr) => {
       abriu();
+      this.estado = "QR";
+      this.qrAtual = qr;
       console.log("Escaneie o QR com o celular do chip (WhatsApp → Aparelhos conectados → Conectar aparelho):");
       qrcode.generate(qr, { small: true });
     });
@@ -176,6 +246,8 @@ export class CanalWwebjs implements CanalWhatsApp {
     });
     cliente.on("authenticated", () => {
       abriu();
+      this.estado = "AUTENTICANDO";
+      this.qrAtual = null;
       if (vigiaPronto) clearTimeout(vigiaPronto);
       vigiaPronto = setTimeout(() => {
         if (!pronto) void this.trocarVersao(cliente);
@@ -187,12 +259,20 @@ export class CanalWwebjs implements CanalWhatsApp {
       if (vigiaPronto) clearTimeout(vigiaPronto);
       this.meuWid = cliente.info.wid._serialized;
       this.meuTelefone = normalizarTelefone(cliente.info.wid.user);
+      this.meuNome = cliente.info.pushname || null;
+      this.estado = "CONECTADO";
+      this.qrAtual = null;
+      this.conectadoEm = new Date().toISOString();
+      this.ultimoErro = null;
       this.saude = novoEstadoSaude();
       console.log(`WhatsApp pronto (${this.meuTelefone}).`);
       void this.descobrirMeuLid(cliente);
       this.aoProntoHandler();
     });
-    cliente.on("auth_failure", (mensagem) => this.opcoes.log({ type: "auth_failure", mensagem }));
+    cliente.on("auth_failure", (mensagem) => {
+      this.ultimoErro = `Falha de autenticação: ${mensagem}`;
+      this.opcoes.log({ type: "auth_failure", mensagem });
+    });
     cliente.on("message_create", (msg) => {
       // Cliente antigo que não morreu direito ecoaria o mesmo envio e viraria "atendente assumiu".
       if (this.cliente !== cliente || msg.type === "ciphertext") return;
@@ -206,15 +286,12 @@ export class CanalWwebjs implements CanalWhatsApp {
   }
 
   private async converter(msg: Message): Promise<MensagemRecebida> {
-    // Sem id o lote vira 400 na API (#30: o WhatsApp Web trocou _serialized por $1).
-    const id = msg.id?._serialized;
-    if (!id) throw new Error(`mensagem sem id (tipo ${msg.type})`);
     const chatId = msg.fromMe ? msg.to : msg.from;
     const direta = ehConversaDireta(chatId, msg.author);
     const telefone = direta ? await this.resolverTelefone(chatId) : null;
     const tipo = tipoDaMensagem(msg.type);
     const recebida: MensagemRecebida = {
-      id,
+      id: msg.id._serialized ?? `${msg.id.fromMe}_${(msg.id as unknown as Record<string, unknown>).remote}_${(msg.id as unknown as Record<string, unknown>).id}`,
       chatId,
       telefone,
       deMim: msg.fromMe,
@@ -226,8 +303,13 @@ export class CanalWwebjs implements CanalWhatsApp {
       texto: msg.body ?? "",
       timestamp: new Date((msg.timestamp || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
     };
-    const tamanho = (msg as unknown as { _data?: { size?: unknown } })._data?.size;
+    const dados = (msg as unknown as { _data?: { size?: unknown; notifyName?: unknown } })._data;
+    const tamanho = dados?.size;
     if (typeof tamanho === "number") recebida.bytesDeclarados = tamanho;
+    // notifyName é o nome de perfil que veio junto da mensagem: não custa uma ida ao WhatsApp como getContact()
+    if (!msg.fromMe && typeof dados?.notifyName === "string" && dados.notifyName.trim()) {
+      recebida.nomeContato = dados.notifyName.trim();
+    }
     if (tipo === "midia") {
       recebida.baixarMidia = async () => {
         const midia = await msg.downloadMedia();
@@ -281,6 +363,7 @@ export class CanalWwebjs implements CanalWhatsApp {
     const estado = this.cliente ? await comPrazo(this.cliente.getState(), 5_000).catch(() => null) : null;
     const decisao = decidirSaude(estado, this.saude);
     if (decisao === "desvinculado") {
+      this.estado = "DESVINCULADO";
       console.error("🚨 WhatsApp DESVINCULADO. A ponte parou de tentar: suba de novo e escaneie o QR (ou use WHATSAPP_PAREAR_TELEFONE).");
     } else if (decisao === "reconectar") {
       await this.reconectar("verificação de saúde");
@@ -302,37 +385,19 @@ export class CanalWwebjs implements CanalWhatsApp {
   private async reconectar(motivo: string): Promise<void> {
     if (this.reconectando || this.encerrando || this.saude.desvinculado) return;
     this.reconectando = true;
+    this.estado = "RECONECTANDO";
     console.warn(`Reconectando o WhatsApp (${motivo})…`);
     try {
       const antigo = this.cliente;
       this.cliente = null;
       // destroy(), nunca logout(): logout apaga a sessão e obriga a escanear o QR de novo.
-      if (antigo) await this.derrubar(antigo);
+      if (antigo) await antigo.destroy().catch(() => {});
       await this.lancar();
     } catch (err) {
       this.opcoes.log({ type: "reconexao_falhou", erro: String(err) });
-      console.error(`🚨 Reconexão do WhatsApp falhou (${String(err)}). A ponte está parada até reconectar; se repetir, reinicie o processo.`);
     } finally {
       this.reconectando = false;
     }
-  }
-
-  /** O destroy() da biblioteca só fecha o Chrome com o CDP de pé; caído, o Chrome segue vivo segurando o perfil (#29). */
-  private async derrubar(cliente: ClienteWhatsApp): Promise<void> {
-    const processo = cliente.pupBrowser?.process();
-    await comPrazo(cliente.destroy(), 10_000).catch((err) =>
-      this.opcoes.log({ type: "destroy_falhou", erro: String(err) })
-    );
-    if (!processo || processo.exitCode !== null || processo.signalCode !== null) return;
-    const saiu = new Promise<void>((resolve) => processo.once("exit", () => resolve()));
-    try {
-      // No Windows o kill lança EACCES se o Chrome estiver no meio da saída; sem o try a rejeição derrubava a ponte.
-      processo.kill("SIGKILL");
-    } catch (err) {
-      this.opcoes.log({ type: "chrome_nao_morreu", erro: String(err) });
-      return;
-    }
-    await comPrazo(saiu, 5_000).catch(() => this.opcoes.log({ type: "chrome_nao_morreu", pid: processo.pid }));
   }
 
   private async trocarVersao(cliente: ClienteWhatsApp): Promise<void> {
@@ -346,8 +411,10 @@ export class CanalWwebjs implements CanalWhatsApp {
     // A biblioteca emite o motivo e já começa a destruir o cliente: o getState() abaixo pode nem responder.
     if (desconexaoTerminal(motivo)) {
       this.saude.desvinculado = true;
+      this.estado = "DESVINCULADO";
+      this.ultimoErro = `Desconectado pelo celular (${motivo}). Gere um novo QR no CRM.`;
       if (this.cliente === cliente) this.cliente = null;
-      await this.derrubar(cliente);
+      await comPrazo(cliente.destroy(), 10_000).catch(() => {});
       console.error(`🚨 WhatsApp desconectado de vez (${motivo}). Suba de novo e escaneie o QR.`);
       return;
     }

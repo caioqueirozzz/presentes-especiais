@@ -1,6 +1,5 @@
 import { createHash } from "crypto";
 import { v4 as uuidv4 } from "uuid";
-import { markdownParaWhatsApp } from "../contrato/texto.js";
 
 export interface Mensagem {
   role: "user" | "assistant";
@@ -53,17 +52,6 @@ export interface FichaPedido {
   };
 }
 
-export interface CorDoProduto {
-  subproduto_id: string;
-  cor: string;
-}
-
-export interface ProdutoDetalhado {
-  id: string;
-  nome: string;
-  cores: CorDoProduto[];
-}
-
 export interface ConversationState {
   conversaId: string;
   telefone: string;
@@ -74,6 +62,16 @@ export interface ConversationState {
     tipo?: "PF" | "PJ";
     nome?: string;
     email?: string;
+    /** Nome de perfil do WhatsApp, já limpo (ver limparNomeWhatsapp). É o "Olá, Fulano" da abertura. */
+    nomeWhatsapp?: string;
+    empresa?: string;
+  };
+  /**
+   * Memória contextual: o que o cliente contou e precisa ser lembrado mesmo depois que a mensagem
+   * sai da janela de histórico mandada ao modelo. Preenchida por registrar_contexto.
+   */
+  memoria?: {
+    fatos: string[];
   };
   necessidade: {
     ocasiao?: string;
@@ -84,12 +82,10 @@ export interface ConversationState {
     dataLimite?: string;
   };
   produtosDiscutidos: string[];
-  /** id → nome de tudo que entrou em produtosDiscutidos: a ficha do atendente mostra nome, não id. */
-  nomesProdutos?: Record<string, string>;
   /** A última lista de buscar_produtos, na ordem mostrada: é a que "a primeira opção" aponta. */
-  ultimasOpcoes?: Array<{ id: string; nome: string; cores?: CorDoProduto[] }>;
+  ultimasOpcoes?: Array<{ id: string; nome: string }>;
   /** Os últimos de detalhar_produto, o mais recente primeiro: sem isto o subproduto_id da cor some no turno seguinte. */
-  produtosDetalhados?: ProdutoDetalhado[];
+  produtosDetalhados?: Array<{ id: string; nome: string; cores: Array<{ subproduto_id: string; cor: string }> }>;
   /**
    * subproduto_id → produto_id. GET /product (listagem) não traz subprodutos,
    * então só dá para resolver um subproduto via GET /product/{id}. O mapa é
@@ -100,6 +96,11 @@ export interface ConversationState {
   /** Arquivos que chegaram pelo WhatsApp (gravados pela ponte). Ausente em estados salvos antes da Fase 4. */
   arquivosRecebidos?: ArquivoRecebido[];
   fichaPedido?: FichaPedido;
+  /**
+   * A estimativa que o cliente confirmou e foi para a equipe emitir. fichaPedido some na transferência;
+   * isto fica: é o registro de que a triagem terminou (o CRM qualifica o lead como quente por ele).
+   */
+  orcamentoEnviado?: FichaPedido["resumo"] & { enviado_em: string };
   falhasConsecutivas: number;
   falhasValidacaoPedido: number;
   /** Consultas de pedido nesta conversa — teto contra varredura de códigos. */
@@ -144,37 +145,6 @@ export function marcaUltimaMensagemCliente(state: ConversationState): string {
   return m ? createHash("sha256").update(m.content.trim()).digest("hex").slice(0, 16) : "";
 }
 
-/** O fim da conversa para o atendente, no formato que o WhatsApp mostra (o cliente recebeu assim, não em Markdown). */
-export function ultimasMensagens(state: ConversationState): string {
-  return state.historico
-    .slice(-4)
-    .map((m) => `[${m.role}]: ${markdownParaWhatsApp(m.content)}`)
-    .join("\n");
-}
-
-/** Cobre "me fala da primeira, e da segunda? fico com a primeira". */
-const PRODUTOS_DETALHADOS_GUARDADOS = 3;
-
-/** O mais recente primeiro: é daqui que o subproduto_id da cor chega ao turno seguinte. */
-export function lembrarDetalhado(state: ConversationState, detalhado: ProdutoDetalhado): void {
-  state.produtosDetalhados = [detalhado, ...(state.produtosDetalhados ?? []).filter((d) => d.id !== detalhado.id)].slice(
-    0,
-    PRODUTOS_DETALHADOS_GUARDADOS
-  );
-}
-
-/** Os produtos discutidos pelo nome, para o atendente; id sem nome conhecido fica como está. */
-export function nomesDosProdutos(state: ConversationState): string[] {
-  // As listas recentes cobrem estados gravados antes de nomesProdutos existir.
-  const recentes = new Map([...(state.produtosDetalhados ?? []), ...(state.ultimasOpcoes ?? [])].map((p) => [p.id, p.nome]));
-  return state.produtosDiscutidos.map((id) => state.nomesProdutos?.[id] ?? recentes.get(id) ?? id);
-}
-
-export function discutirProduto(state: ConversationState, id: string, nome: string): void {
-  if (!state.produtosDiscutidos.includes(id)) state.produtosDiscutidos.push(id);
-  state.nomesProdutos = { ...state.nomesProdutos, [id]: nome };
-}
-
 export function normalizePhone(phone: string): string {
   return phone.replace(/\D/g, "");
 }
@@ -186,4 +156,20 @@ export function phoneMatches(phone1: string, phone2: string): boolean {
   // compare with/without country code 55
   const strip55 = (p: string) => (p.startsWith("55") && p.length > 11 ? p.slice(2) : p);
   return strip55(a) === strip55(b);
+}
+
+/**
+ * Nome de perfil do WhatsApp em condição de virar "Olá, Fulano": sem emoji nem símbolo,
+ * espaços colapsados. Perfil só com número, ponto ou emoji não é nome: undefined.
+ */
+export function limparNomeWhatsapp(nome: string | undefined): string | undefined {
+  if (!nome) return undefined;
+  const limpo = nome
+    .normalize("NFC")
+    .replace(/[^\p{L}\p{M}\s'.-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 60)
+    .trim();
+  return /\p{L}{2,}/u.test(limpo) ? limpo : undefined;
 }

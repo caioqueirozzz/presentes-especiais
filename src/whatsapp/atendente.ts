@@ -256,7 +256,7 @@ export class Atendimento {
     return desfecho;
   }
 
-  private async devolver(telefone: string, nota: string | undefined, observacao?: string): Promise<void> {
+  async devolver(telefone: string, nota: string | undefined, observacao?: string): Promise<void> {
     const evento: Evento = { tipo: "devolver", telefone, ...(nota ? { nota } : {}) };
     const desfecho = await this.entregar(evento);
     if (desfecho === "entregue") {

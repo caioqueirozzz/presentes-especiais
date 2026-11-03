@@ -18,6 +18,8 @@ export const mensagemLoteSchema = z.object({
   timestamp,
   texto: z.string().max(LIMITE_TEXTO),
   arquivo: arquivoSchema.optional(),
+  /** Nome de perfil do WhatsApp do cliente; o agente usa para cumprimentar pelo nome. */
+  nomeContato: z.string().max(100).optional(),
 });
 
 export const pedidoMensagensSchema = z.object({

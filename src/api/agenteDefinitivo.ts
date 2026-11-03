@@ -9,7 +9,7 @@ import type {
   RespostaMensagens,
 } from "../contrato/esquemas.js";
 import { formatarParaWhatsApp, loteParaTexto } from "../contrato/texto.js";
-import { addMessage, type ConversationState } from "../agent/state.js";
+import { addMessage, limparNomeWhatsapp, type ConversationState } from "../agent/state.js";
 import { runTurn, type TurnResult } from "../agent/runTurn.js";
 import type { LLMProvider } from "../llm/types.js";
 import type { BrindeMeClient } from "../integrations/brindeme/client.js";
@@ -135,6 +135,9 @@ export class AgenteDefinitivo implements Agente {
 
     registrarArquivos(estado, novas);
     descartarSobra(estado, texto);
+    // O perfil pode mudar de nome no meio da conversa: vale o da mensagem mais recente
+    const nomeWhatsapp = limparNomeWhatsapp([...novas].reverse().find((m) => m.nomeContato)?.nomeContato);
+    if (nomeWhatsapp) estado.cliente.nomeWhatsapp = nomeWhatsapp;
 
     if (conversa.transferenciaPendente) {
       addMessage(estado, "user", texto);

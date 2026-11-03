@@ -10,6 +10,8 @@ import { prepararOrcamentoSchema, prepararOrcamentoHandler } from "./prepararOrc
 import { consultarPedidoSchema, consultarPedidoHandler } from "./consultarPedido.js";
 import { registrarArteSchema, registrarArteHandler } from "./registrarArte.js";
 import { transferirHumanoSchema, transferirHumanoHandler } from "./transferirHumano.js";
+import { registrarContextoSchema, registrarContextoHandler } from "./registrarContexto.js";
+import { andamentoPedidoSchema, andamentoPedidoHandler } from "./andamentoPedido.js";
 
 /**
  * Schema da ferramenta no formato que a OpenAI aceita.
@@ -70,6 +72,14 @@ export const tools: ToolDefinition[] = [
     handler: prepararOrcamentoHandler as ToolDefinition["handler"],
   },
   {
+    name: "andamento_pedido",
+    description:
+      "Andamento dos pedidos do cliente na operação da loja (pedido confirmado, arte e mockup, produção, personalização, conferência, envio, entregue), com previsão de entrega e recado da equipe. Use primeiro sempre que o cliente perguntar como está o pedido dele, com ou sem código: o telefone da conversa já identifica o cliente. Se não houver pedido no quadro e o cliente tiver um código, use consultar_pedido.",
+    inputSchema: schemaDaFerramenta(andamentoPedidoSchema),
+    schema: andamentoPedidoSchema,
+    handler: andamentoPedidoHandler as ToolDefinition["handler"],
+  },
+  {
     name: "consultar_pedido",
     description:
       "Consulta status e prazo de entrega de um pedido. Basta o código: o telefone da conversa é validado sozinho. Só passe o e-mail se o retorno anterior foi precisa_email. Nunca retorna dados sensíveis (CPF, e-mail, boleto, NF).",
@@ -84,6 +94,14 @@ export const tools: ToolDefinition[] = [
     inputSchema: schemaDaFerramenta(registrarArteSchema),
     schema: registrarArteSchema,
     handler: registrarArteHandler as ToolDefinition["handler"],
+  },
+  {
+    name: "registrar_contexto",
+    description:
+      "Memória da conversa: guarda o que o cliente contou para você lembrar nos próximos turnos. Chame assim que souber se é PF ou PJ, o nome pelo qual quer ser chamado, a empresa, a ocasião ou um detalhe importante (número de pessoas, data do evento, preferência de cor, compra anterior). Pode ir junto de outra ferramenta na mesma resposta. Não registre o que já está no estado da conversa nem dados sensíveis (CPF, CNPJ, endereço).",
+    inputSchema: schemaDaFerramenta(registrarContextoSchema),
+    schema: registrarContextoSchema,
+    handler: registrarContextoHandler as ToolDefinition["handler"],
   },
   {
     name: "transferir_humano",

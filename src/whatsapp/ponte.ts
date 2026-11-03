@@ -13,6 +13,7 @@ import { MemoriaEstadoPonte, type ArmazemPonte, type EntregaParcial } from "./es
 import { ConjuntoLimitado, FilaConversas, type OpcoesFila } from "./fila.js";
 import type { LogPonte } from "./log.js";
 import { salvarMidia, TAMANHO_MAXIMO_BYTES } from "./midia.js";
+import { iaAtende, type ConfigLia } from "./modoLia.js";
 import { normalizarTelefone } from "./telefone.js";
 
 export const ESPERA_EM_ANDAMENTO_MS = 5_000;
@@ -33,6 +34,25 @@ export function alertaAgenteFora(minutos: number): string {
   return `⚠️ O agente não responde há ${minutos} min. Quem escrever recebe o aviso de instabilidade. Veja o terminal do agente.`;
 }
 
+/** Quem escreveu, do ponto de vista da loja. ATENDENTE: alguém da equipe (pelo celular ou pelo CRM). */
+export type AutorMensagem = "CLIENTE" | "AGENTE" | "ATENDENTE";
+
+export interface MensagemObservada {
+  id: string;
+  telefone: string;
+  autor: AutorMensagem;
+  tipo: MensagemRecebida["tipo"];
+  texto: string;
+  timestamp: string;
+}
+
+/** Quem acompanha a ponte de fora (o CRM). Chamadas sem esperar: a ponte nunca trava por causa dele. */
+export interface ObservadorPonte {
+  mensagem(m: MensagemObservada): void;
+  /** O agente terminou (ou desistiu de) um lote desta conversa: o estado dela pode ter mudado. */
+  conversaAtualizada(telefone: string): void;
+}
+
 export interface OpcoesPonte {
   artesDir: string;
   liberados: string[];
@@ -41,6 +61,7 @@ export interface OpcoesPonte {
   enviosPorMinuto: number;
   /** Onde a ponte guarda o que precisa lembrar depois de reiniciar (padrão: só memória). */
   armazem?: ArmazemPonte;
+  observador?: ObservadorPonte;
 }
 
 /** entregue: tudo saiu · vazio: o agente não respondeu nada · descartado: o atendente assumiu · pendente: repetir depois */
@@ -51,6 +72,11 @@ const MARCADOR_DO_SISTEMA = /\[(?=\s*(?:arquivo|atendente|imagem|in[íi]cio do t
 
 export function neutralizarMarcadores(texto: string): string {
   return texto.replace(MARCADOR_DO_SISTEMA, "(o cliente escreveu) [");
+}
+
+/** O nome de perfil viaja com a mensagem até o agente; cortado no limite do contrato. */
+function nomeDoContato(m: MensagemRecebida): { nomeContato?: string } {
+  return m.nomeContato ? { nomeContato: m.nomeContato.slice(0, 100) } : {};
 }
 
 function juntar(primeira: string, segunda: string): string {
@@ -79,6 +105,8 @@ export class Ponte {
   private readonly entregasParciais: Map<string, EntregaParcial>;
   private avisosPendentes: string[];
   private readonly liberados: Set<string>;
+  /** Modo escolhido no CRM; quando definido, vale no lugar de liberados. */
+  private modoLia: ConfigLia | null = null;
   private queda: { desde: number; alertado: boolean; avisados: Set<string> } | null = null;
   private varrendo = false;
   private salvamento: ReturnType<typeof setTimeout> | undefined;
@@ -100,9 +128,19 @@ export class Ponte {
       aoMudar: () => this.agendarSalvar(),
     });
     this.fila = new FilaConversas(opcoes.lote, (telefone, chatId, mensagens) =>
-      this.processarLote(telefone, chatId, mensagens)
+      this.processarLote(telefone, chatId, mensagens).finally(() => this.opcoes.observador?.conversaAtualizada(telefone))
     );
     this.liberados = new Set(opcoes.liberados.map(normalizarTelefone));
+  }
+
+  /** Troca o modo da Lia na hora (aba Conexão do CRM). Vale para a próxima mensagem que chegar. */
+  definirModoLia(config: ConfigLia): void {
+    this.modoLia = config;
+  }
+
+  private iaAtende(telefone: string): boolean {
+    if (this.modoLia) return iaAtende(this.modoLia, telefone);
+    return this.liberados.size === 0 || this.liberados.has(telefone);
   }
 
   iniciar(intervaloVarreduraMs: number): void {
@@ -112,11 +150,32 @@ export class Ponte {
   }
 
   async receber(m: MensagemRecebida): Promise<void> {
+    this.observar(m);
     try {
       if (m.deMim) await this.atendimento.receberMinha(m);
       else await this.receberDoCliente(m);
     } catch (err) {
       this.log({ type: "erro_ao_receber", id: m.id, erro: String(err) });
+    }
+  }
+
+  /** Devolve a conversa à IA a pedido de fora (o CRM), como o #devolver digitado no chip. */
+  devolverParaIa(telefone: string, nota?: string): Promise<void> {
+    return this.atendimento.devolver(normalizarTelefone(telefone), nota, "pelo CRM");
+  }
+
+  /**
+   * Repassa a mensagem ao observador antes do Atendimento consumir o registro de saída:
+   * é esse registro que diz se a mensagem "minha" foi da IA ou de uma pessoa.
+   */
+  private observar(m: MensagemRecebida): void {
+    const observador = this.opcoes.observador;
+    if (!observador || !m.direta || !m.telefone || m.paraMim || m.tipo === "ignorada") return;
+    const autor: AutorMensagem = !m.deMim ? "CLIENTE" : this.envio.seriaMinha(m.telefone, m.texto) ? "AGENTE" : "ATENDENTE";
+    try {
+      observador.mensagem({ id: m.id, telefone: m.telefone, autor, tipo: m.tipo, texto: m.texto, timestamp: m.timestamp });
+    } catch (err) {
+      this.log({ type: "observador_falhou", erro: String(err) });
     }
   }
 
@@ -167,7 +226,7 @@ export class Ponte {
 
   private async receberDoCliente(m: MensagemRecebida): Promise<void> {
     if (!m.direta || !m.telefone || this.concluidos.has(m.id) || this.reservados.has(m.id)) return;
-    if (this.liberados.size > 0 && !this.liberados.has(m.telefone)) return;
+    if (!this.iaAtende(m.telefone)) return;
     const telefone = m.telefone;
 
     if (m.tipo === "audio" || m.tipo === "ignorada") {
@@ -186,13 +245,13 @@ export class Ponte {
     if (m.tipo === "midia") {
       // O lugar na fila é reservado antes do download para a imagem não chegar depois do texto que veio atrás dela.
       if (!this.fila.reservar(telefone, m.chatId, m.id)) return;
-      this.fila.preencher(telefone, m.id, await this.mensagemDeMidia(telefone, m));
+      this.fila.preencher(telefone, m.id, { ...(await this.mensagemDeMidia(telefone, m)), ...nomeDoContato(m) });
       return;
     }
 
     const doCliente = neutralizarMarcadores(m.texto);
     const texto = m.tipo === "nao_suportada" ? juntar(RECUSA_VIDEO, doCliente.trim()) : doCliente.slice(0, LIMITE_TEXTO);
-    this.fila.adicionar(telefone, m.chatId, { id: m.id, timestamp: m.timestamp, texto });
+    this.fila.adicionar(telefone, m.chatId, { id: m.id, timestamp: m.timestamp, texto, ...nomeDoContato(m) });
   }
 
   private async mensagemDeMidia(telefone: string, m: MensagemRecebida): Promise<MensagemLote> {
@@ -207,8 +266,7 @@ export class Ponte {
     } catch (err) {
       this.log({ type: "midia_nao_baixou", id: m.id, erro: String(err) });
     }
-    // Falha nossa, não do arquivo: sem dizer isso o agente culpava o formato (#25).
-    if (!midia) return recusa("[arquivo recusado: arquivo, não chegou por falha nossa ao baixar; não é o formato]");
+    if (!midia) return recusa("[arquivo recusado: arquivo, não foi possível baixar]");
     const salvo = salvarMidia(this.opcoes.artesDir, telefone, m.id, midia);
     if (!salvo.ok) return recusa(`[arquivo recusado: ${salvo.nome}, ${salvo.motivo}]`);
     return { id: m.id, timestamp: m.timestamp, texto: legenda.slice(0, LIMITE_TEXTO), arquivo: salvo.arquivo };

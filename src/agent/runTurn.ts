@@ -81,13 +81,30 @@ function esperarOuCancelar<T>(promessa: Promise<T>, signal?: AbortSignal): Promi
   });
 }
 
+/** Silêncio a partir do qual a mensagem nova é um retorno do cliente, não a continuação da conversa. */
+const PAUSA_DE_RETORNO_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Em que ponto da conversa o cliente está. A mensagem nova já está no fim do histórico.
+ * "inicio": a assistente ainda não falou · "retorno": voltou depois de um tempo · "andamento": o resto.
+ */
+export function momentoDaConversa(historico: Mensagem[]): "inicio" | "retorno" | "andamento" {
+  const anteriores = historico.slice(0, -1);
+  if (!anteriores.some((m) => m.role === "assistant")) return "inicio";
+  const atual = Date.parse(historico.at(-1)?.timestamp ?? "");
+  const ultima = Date.parse(anteriores.at(-1)?.timestamp ?? "");
+  return atual - ultima >= PAUSA_DE_RETORNO_MS ? "retorno" : "andamento";
+}
+
 function loadSystemPrompt(state: ConversationState): string {
   const template = readFileSync(join(__dir, "prompt/system.md"), "utf-8");
   const stateForPrompt = {
     // Sem a data, o modelo completava "20/11" com o ano do treino (2023-11-20 na ficha, 25/10).
     hoje: new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }),
+    momento_da_conversa: momentoDaConversa(state.historico),
     modo: state.modo,
     cliente: state.cliente,
+    memoria: state.memoria?.fatos ?? [],
     necessidade: state.necessidade,
     artes_registradas: state.artes.length,
     produtos_discutidos: state.produtosDiscutidos,
@@ -95,10 +112,12 @@ function loadSystemPrompt(state: ConversationState): string {
     produtos_detalhados: state.produtosDetalhados,
     // Resultados de ferramenta não passam para o turno seguinte: sem isto a confirmação não acha a estimativa.
     estimativa_aguardando_confirmacao: state.fichaPedido?.resumo,
+    // Memória: o cliente que volta depois do orçamento não é tratado como conversa nova.
+    orcamento_ja_enviado_a_equipe: state.orcamentoEnviado,
   };
 
   return template
-    .replace("{{ASSISTANT_NAME}}", config.assistantName)
+    .replace(/\{\{ASSISTANT_NAME\}\}/g, config.assistantName)
     .replace(/\{\{STORE_NAME\}\}/g, config.storeName)
     .replace("{{ESTADO}}", JSON.stringify(stateForPrompt, null, 2));
 }

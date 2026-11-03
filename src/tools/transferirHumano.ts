@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { BrindeMeClient } from "../integrations/brindeme/client.js";
 import type { ConversationState, FichaPedido } from "../agent/state.js";
-import { marcaUltimaMensagemCliente, nomesDosProdutos, ultimasMensagens } from "../agent/state.js";
+import { marcaUltimaMensagemCliente } from "../agent/state.js";
 
 export const MOTIVOS = [
   "orcamento_para_emitir",
@@ -39,8 +39,6 @@ export interface ResumoTransferencia {
   prioridade: "normal" | "alta";
   observacao?: string;
   produtos_discutidos: string[];
-  /** Opcional: resumo gravado em disco antes deste campo existir não pode travar a transferência. */
-  produtos_nomes?: string[];
   /** Estimativa confirmada pelo cliente, para o atendente emitir o orçamento (motivo orcamento_para_emitir). */
   ficha_pedido?: FichaPedido["resumo"];
   artes_registradas: string[];
@@ -95,6 +93,11 @@ export async function transferirHumanoHandler(
     adminResponsavel = { id: "desconhecido", name: "Equipe", email: "", phone: "" };
   }
 
+  const ultimasMensagens = state.historico
+    .slice(-4)
+    .map((m) => `[${m.role}]: ${m.content}`)
+    .join("\n");
+
   const resumo: ResumoTransferencia = {
     conversaId: state.conversaId,
     telefone_cliente: maskPhone(state.telefone),
@@ -103,11 +106,10 @@ export async function transferirHumanoHandler(
     prioridade: input.prioridade,
     observacao: input.observacao,
     produtos_discutidos: state.produtosDiscutidos,
-    produtos_nomes: nomesDosProdutos(state),
     ...(state.fichaPedido ? { ficha_pedido: state.fichaPedido.resumo } : {}),
     artes_registradas: state.artes.map((a) => a.arquivo),
     necessidade: state.necessidade,
-    ultimas_mensagens: ultimasMensagens(state),
+    ultimas_mensagens: ultimasMensagens,
     responsavel: {
       id: adminResponsavel.id,
       nome: adminResponsavel.name,
@@ -116,6 +118,9 @@ export async function transferirHumanoHandler(
   };
 
   state.modo = "humano";
+  if (input.motivo === "orcamento_para_emitir" && state.fichaPedido) {
+    state.orcamentoEnviado = { ...state.fichaPedido.resumo, enviado_em: resumo.transferido_em };
+  }
   state.fichaPedido = undefined;
 
   return {

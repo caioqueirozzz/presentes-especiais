@@ -19,6 +19,8 @@ export interface MensagemRecebida {
   tipo: TipoMensagem;
   texto: string;
   timestamp: string;
+  /** Nome de perfil do WhatsApp de quem escreveu (pushname). Só em mensagem do cliente, quando o WhatsApp informa. */
+  nomeContato?: string;
   /** Tamanho informado pelo WhatsApp antes do download, quando ele informa. */
   bytesDeclarados?: number;
   baixarMidia?: () => Promise<MidiaBaixada | null>;

@@ -29,6 +29,12 @@ export class RegistroSaida {
     return saida;
   }
 
+  /** Como consumir, mas sem tirar do registro: só pergunta se esta saída foi nossa. */
+  contem(chave: string, texto: string): boolean {
+    const agora = Date.now();
+    return this.pendentes.some((p) => p.chave === chave && p.texto === texto.trim() && agora - p.em <= this.validadeMs);
+  }
+
   consumir(chave: string, texto: string): boolean {
     const agora = Date.now();
     this.pendentes = this.pendentes.filter((p) => agora - p.em <= this.validadeMs);
@@ -72,6 +78,11 @@ export class Envio {
 
   ehMinha(chave: string, texto: string): boolean {
     return this.registro.consumir(chave, texto);
+  }
+
+  /** Igual a ehMinha, sem consumir o registro (o Atendimento ainda vai consumir depois). */
+  seriaMinha(chave: string, texto: string): boolean {
+    return this.registro.contem(chave, texto);
   }
 
   /** `continuar` é conferido logo antes de cada tentativa sair; false cancela o envio (devolve false). */
