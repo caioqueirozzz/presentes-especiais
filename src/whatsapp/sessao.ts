@@ -116,7 +116,7 @@ export class CanalWwebjs implements CanalWhatsApp {
       this.cliente = null;
       if (antigo) {
         await comPrazo(antigo.logout(), 15_000).catch(() => {});
-        await comPrazo(antigo.destroy(), 10_000).catch(() => {});
+        await this.derrubar(antigo);
       }
       this.meuWid = this.meuTelefone = this.meuLid = "";
       this.meuNome = this.conectadoEm = null;

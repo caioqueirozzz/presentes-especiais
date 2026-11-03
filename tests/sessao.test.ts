@@ -58,6 +58,7 @@ vi.mock("whatsapp-web.js", async () => {
       this.destruido = true;
       if (controle.destroyFechaNavegador) this.processo.exitCode = 0;
     }
+    async logout() {}
     async getState() {
       return controle.estado;
     }
@@ -359,6 +360,16 @@ describe("CanalWwebjs (biblioteca falsa)", () => {
     await vi.advanceTimersByTimeAsync(6_000);
     expect(controle.clientes).toHaveLength(2);
     expect(eventos).toContainEqual({ type: "chrome_nao_morreu", erro: "Error: kill EACCES" });
+  });
+
+  it("[#29] nova vinculação do CRM também mata o Chrome que sobrevive ao destroy()", async () => {
+    const canal = await montar();
+    controle.destroyFechaNavegador = false;
+    const antigo = clienteAtual() as unknown as { processo: { sinais: string[] } };
+    await canal.novaVinculacao();
+    expect(antigo.processo.sinais).toEqual(["SIGKILL"]);
+    expect(controle.clientes).toHaveLength(2);
+    expect(controle.chromesVivosAoLancar.at(-1)).toBe(0);
   });
 
   it("[#29] Chrome que o destroy() fechou não leva SIGKILL", async () => {
