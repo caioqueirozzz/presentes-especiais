@@ -5,12 +5,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ConnectionBadge, ConnectionPanel, useWhatsAppStatus } from "./ConnectionPanel";
 import { LeadPanel } from "./LeadPanel";
 import { usePortal } from "@/components/portal/Portal";
-import { Avatar, EmptyState, PageHeader, Segmented, TemperatureBadge } from "@/components/ui";
+import { Avatar, CustomerBadges, EmptyState, PageHeader, Segmented, TemperatureBadge, UrgentBadge } from "@/components/ui";
 import { useApi } from "@/lib/client/api";
-import { STAGE_LABELS, isAwaitingSeller, leadDisplayName, relativeTime } from "@/lib/types";
+import { STAGE_LABELS, customerStatus, isAwaitingSeller, leadDisplayName, relativeTime } from "@/lib/types";
 import type { Lead } from "@/lib/types";
 
-const FILTER_KEYS = ["q", "temp", "status", "owner", "attention", "waiting", "stage"] as const;
+const FILTER_KEYS = ["q", "temp", "status", "owner", "attention", "waiting", "stage", "urgent"] as const;
 
 function useSellers(isAdmin: boolean) {
   const { data } = useApi<{ sellers: { id: string; name: string }[] }>(isAdmin ? "/api/settings" : null);
@@ -109,6 +109,7 @@ function CrmContent() {
               />
             </form>
             <div className="thin-scroll -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+              <Chip active={params.get("urgent") === "1"} onClick={() => toggle("urgent", "1")}>🚨 Urgentes</Chip>
               <Chip active={params.get("stage") === "open"} onClick={() => toggle("stage", "open")}>Em aberto</Chip>
               <Chip active={params.get("waiting") === "1"} onClick={() => toggle("waiting", "1")}>Aguardando resposta</Chip>
               <Chip active={params.get("temp") === "quente"} onClick={() => toggle("temp", "quente")}>🔥 Quentes</Chip>
@@ -168,8 +169,14 @@ function CrmContent() {
                           {l.last_message_text ?? "Sem mensagens"}
                         </p>
                         <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                          <TemperatureBadge score={l.lead_score} compact />
-                          <span className="rounded-full bg-on-surface/[0.05] px-2 py-0.5 text-[10px] text-on-surface-variant">{STAGE_LABELS[l.stage]}</span>
+                          <UrgentBadge lead={l} />
+                          {customerStatus(l).showQualification && (
+                            <>
+                              <TemperatureBadge score={l.lead_score} compact />
+                              <span className="rounded-full bg-on-surface/[0.05] px-2 py-0.5 text-[10px] text-on-surface-variant">{STAGE_LABELS[l.stage]}</span>
+                            </>
+                          )}
+                          <CustomerBadges lead={l} />
                           {l.needs_attention && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">atenção</span>}
                           {isAdmin && isAwaitingSeller(l) && <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">sem vendedor</span>}
                           {isAdmin && l.assigned_name && <span className="truncate text-[10px] text-on-surface-variant">· {l.assigned_name}</span>}

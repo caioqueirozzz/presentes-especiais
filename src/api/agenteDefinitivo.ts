@@ -328,6 +328,7 @@ function transferirPeloSistema(
   logger: Logger
 ): RespostaMensagens {
   estado.modo = "humano";
+  estado.ultimaTransferencia = { motivo, prioridade: "alta", observacao, em: new Date().toISOString() };
   addMessage(estado, "assistant", mensagem);
   logger.log({ type: "transfer", motivo, prioridade: "alta" });
   return {

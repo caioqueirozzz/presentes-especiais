@@ -97,6 +97,13 @@ export async function PATCH(request: Request, { params }: Context) {
       set("attention_reason", null);
     }
 
+    // Urgência resolvida: sai do topo. urgent_at fica, para a mesma transferência não marcar de novo.
+    if (body.is_urgent === false && lead.is_urgent) {
+      set("is_urgent", false);
+      set("urgent_reason", null);
+      events.push({ type: "URGENCIA", data: { resolvida: true, motivo: lead.urgent_reason } });
+    }
+
     if ("stage" in body) {
       const stage = body.stage as Stage;
       if (!STAGES.includes(stage)) return jsonError("Etapa inválida.", 400);

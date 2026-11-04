@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { query, transaction } from "@/lib/db";
+import type { Executor as Tx } from "@/lib/db";
+import { detectarIntencao } from "@/lib/intencao";
 import { autoAssignLead, logEvent, notify } from "@/lib/leads";
+import { phoneVariants } from "@/lib/orders";
 import type { LeadQualification, QualificationStatus } from "@/lib/types";
 
 /*
@@ -37,6 +40,10 @@ export interface AgentState {
   /** Estimativa confirmada e transferida para a equipe. A fichaPedido some na transferência; esta fica. */
   orcamentoEnviado?: FichaResumo & { enviado_em?: string };
   memoria?: { fatos?: string[] };
+  /** Sobe quando o cliente que já comprou começa um pedido novo (ferramenta iniciar_novo_pedido) */
+  ciclo?: number;
+  /** A última transferência para uma pessoa (a pendente some quando o turno termina) */
+  ultimaTransferencia?: { motivo?: string; prioridade?: "normal" | "alta"; observacao?: string; em?: string };
   historico?: Array<{ role: "user" | "assistant"; content: string; timestamp: string }>;
 }
 
@@ -170,6 +177,7 @@ const TRANSFER_REASONS: Record<string, string> = {
   orcamento_para_emitir: "Estimativa confirmada: emitir o orçamento",
   pedido_cliente: "Cliente pediu para falar com uma pessoa",
   reclamacao: "Reclamação",
+  cancelamento_estorno: "Cancelamento ou estorno",
   desconto: "Pedido de desconto",
   pagamento: "Dúvida de pagamento",
   frete_prazo: "Frete ou prazo",
@@ -184,6 +192,38 @@ const TRANSFER_REASONS: Record<string, string> = {
 export function transferReason(motivo?: string, observacao?: string): string {
   const base = (motivo && TRANSFER_REASONS[motivo]) || motivo || "Transferido para atendimento humano";
   return observacao ? `${base} — ${observacao}` : base;
+}
+
+/** Motivos de transferência que marcam o contato como urgente */
+const URGENT_REASONS = new Set(["reclamacao", "cancelamento_estorno"]);
+
+/**
+ * Marca o contato como urgente (topo da lista, aviso à gestão e ao vendedor). Já urgente, não repete o aviso.
+ * Também liga o "pede atenção", para entrar na fila de quem precisa de uma pessoa.
+ */
+export async function markUrgent(tx: Tx, leadId: string, reason: string, who: string, onlyIfAfter?: string): Promise<boolean> {
+  // onlyIfAfter: o fato (a transferência) precisa ser mais novo que a última marcação, senão já foi tratado
+  const marked = await tx.query<{ assigned_to: string | null }>(
+    `UPDATE leads SET is_urgent = true, urgent_reason = $2, urgent_at = NOW(),
+       needs_attention = true, attention_reason = COALESCE(attention_reason, $2)
+     WHERE id = $1 AND NOT is_urgent AND ($3::timestamptz IS NULL OR urgent_at IS NULL OR urgent_at < $3::timestamptz)
+     RETURNING assigned_to`,
+    [leadId, reason.slice(0, 300), onlyIfAfter ?? null]
+  );
+  if (!marked.length) return false;
+  await logEvent(tx, leadId, null, "URGENCIA", { motivo: reason });
+  const admins = await tx.query<{ id: string }>("SELECT id FROM users WHERE role = 'ADMIN' AND is_active");
+  const title = "🚨 Contato urgente";
+  const message = `${who}: ${reason}`;
+  for (const a of admins) await notify(tx, a.id, title, message, `/admin/crm?lead=${leadId}`);
+  const seller = marked[0].assigned_to;
+  if (seller && !admins.some((a) => a.id === seller)) await notify(tx, seller, title, message, `/app/crm?lead=${leadId}`);
+  return true;
+}
+
+/** Pedido cadastrado antes de o cliente escrever ficou sem lead: liga pelo telefone. */
+async function linkOrphanOrders(tx: Tx, leadId: string, phone: string): Promise<void> {
+  await tx.query("UPDATE orders SET lead_id = $1 WHERE lead_id IS NULL AND phone = ANY($2)", [leadId, phoneVariants(phone)]);
 }
 
 function digits(phone: string) {
@@ -209,7 +249,8 @@ export async function ingestConversation(conversation: AgentConversation): Promi
   const scoring = scoreConversation(state);
   const history = (state.historico ?? []).filter((m) => m.content?.trim());
   const last = history[history.length - 1];
-  const transfer = conversation.transferenciaPendente?.resumo;
+  // A pendente some quando o turno termina; a última transferência fica no estado
+  const transfer = conversation.transferenciaPendente?.resumo ?? state.ultimaTransferencia;
   const humanMode = state.modo === "humano";
   const ficha = state.fichaPedido?.resumo ?? state.orcamentoEnviado;
   const name = state.cliente?.nome ?? ficha?.nome ?? state.cliente?.nomeWhatsapp ?? null;
@@ -223,7 +264,43 @@ export async function ingestConversation(conversation: AgentConversation): Promi
       assigned_to: string | null;
       agent_mode: string;
       stage: string;
-    }>("SELECT id, score_locked, qualification_status, qualification_source, assigned_to, agent_mode, stage FROM leads WHERE phone = $1 FOR UPDATE", [phone]);
+      purchase_cycle: number;
+      won_value: number | null;
+      won_at: string | null;
+    }>(
+      `SELECT id, score_locked, qualification_status, qualification_source, assigned_to, agent_mode, stage,
+         purchase_cycle, won_value::float8 AS won_value, won_at
+       FROM leads WHERE phone = $1 FOR UPDATE`,
+      [phone]
+    );
+
+    // Cliente que já comprou começou um pedido novo (iniciar_novo_pedido na Lia): o lead volta para
+    // prospecção e qualificação. A venda fechada vai para lead_sales, para não sumir dos relatórios.
+    const cycle = state.ciclo ?? 0;
+    if (existing && cycle > existing.purchase_cycle) {
+      if (existing.stage === "GANHO" && existing.won_at && existing.won_value) {
+        await tx.query(
+          "INSERT INTO lead_sales (lead_id, seller_id, value, won_at, cycle) VALUES ($1, $2, $3, $4, $5)",
+          [existing.id, existing.assigned_to, existing.won_value, existing.won_at, existing.purchase_cycle]
+        );
+      }
+      await tx.query(
+        `UPDATE leads SET purchase_cycle = $2, cycle_started_at = NOW(), stage = 'NOVO',
+           qualification_status = 'IN_PROGRESS', qualification_source = NULL, qualified_at = NULL,
+           disqualification_reason = NULL, score_locked = false, lead_score = NULL, estimated_value = NULL,
+           won_value = NULL, won_at = NULL, lost_reason = NULL, lost_at = NULL
+         WHERE id = $1`,
+        [existing.id, cycle]
+      );
+      await logEvent(tx, existing.id, null, "NOVO_PEDIDO", { ciclo: cycle, de: existing.stage });
+      const who = name || phone;
+      const admins = await tx.query<{ id: string }>("SELECT id FROM users WHERE role = 'ADMIN' AND is_active");
+      for (const a of admins) await notify(tx, a.id, "Cliente voltou para um novo pedido", `${who} começou um pedido novo com a Lia.`, `/admin/crm?lead=${existing.id}`);
+      if (existing.assigned_to && !admins.some((a) => a.id === existing.assigned_to)) {
+        await notify(tx, existing.assigned_to, "Cliente voltou para um novo pedido", `${who} começou um pedido novo com a Lia.`, `/app/crm?lead=${existing.id}`);
+      }
+      Object.assign(existing, { stage: "NOVO", qualification_status: "IN_PROGRESS", qualification_source: null, score_locked: false });
+    }
 
     // Decisão manual do admin (qualificar/desqualificar) não é desfeita pelo sync, e lead que
     // terminou a triagem não volta a "em qualificação" (agentes antigos apagavam a ficha ao transferir)
@@ -260,6 +337,7 @@ export async function ingestConversation(conversation: AgentConversation): Promi
       );
       leadId = row.id;
       await logEvent(tx, leadId, null, "CRIADO", { origem: "agente" });
+      await linkOrphanOrders(tx, leadId, phone);
     } else {
       leadId = existing.id;
       await tx.query(
@@ -337,6 +415,12 @@ export async function ingestConversation(conversation: AgentConversation): Promi
       }
     }
 
+    // Reclamação ou cancelamento/estorno transferidos pela Lia: contato urgente (uma vez por transferência)
+    const t = state.ultimaTransferencia;
+    if (t?.motivo && URGENT_REASONS.has(t.motivo) && t.em && !Number.isNaN(Date.parse(t.em))) {
+      await markUrgent(tx, leadId, transferReason(t.motivo, t.observacao), name || phone, t.em);
+    }
+
     return { leadId, created: !existing, newMessages, assignedTo: existing?.assigned_to ?? null };
   });
 
@@ -385,7 +469,10 @@ export async function ingestLiveMessage(m: LiveMessage): Promise<{ leadId: strin
       "SELECT id, assigned_to, unread_count, agent_mode, name FROM leads WHERE phone = $1 FOR UPDATE",
       [phone]
     );
-    if (created.length) await logEvent(tx, lead.id, null, "CRIADO", { origem: "whatsapp" });
+    if (created.length) {
+      await logEvent(tx, lead.id, null, "CRIADO", { origem: "whatsapp" });
+      await linkOrphanOrders(tx, lead.id, phone);
+    }
 
     const inserted = await tx.query(
       `INSERT INTO messages (lead_id, external_id, author, body, sent_at, source, kind)
@@ -411,6 +498,17 @@ export async function ingestLiveMessage(m: LiveMessage): Promise<{ leadId: strin
        WHERE id = $1`,
       [lead.id, body, sentAt, fromClient, author === "COLABORADOR", MORNO_MIN, ESFRIAMENTO]
     );
+
+    // Palavras-chave na mensagem do cliente: cancelamento/estorno é urgente sempre; reclamação, para quem
+    // já é cliente (tem pedido no quadro). Quem ainda está comprando e reclama é transferido pela Lia.
+    const sinal = fromClient && kind === "texto" ? detectarIntencao(body) : null;
+    if (sinal) {
+      const [orders] = sinal.tipo === "reclamacao" ? await tx.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM orders WHERE lead_id = $1", [lead.id]) : [{ n: 1 }];
+      if (orders.n > 0) {
+        const reason = sinal.tipo === "cancelamento" ? `Cliente pediu cancelamento ou estorno ("${sinal.termo}")` : `Possível reclamação ("${sinal.termo}")`;
+        await markUrgent(tx, lead.id, reason, lead.name || phone);
+      }
+    }
 
     // Cliente escreveu numa conversa que está com uma pessoa: avisa o vendedor (uma vez por rodada de não lidas)
     const notifySeller = fromClient && lead.agent_mode === "humano" && lead.assigned_to && lead.unread_count === 0 ? lead.assigned_to : null;

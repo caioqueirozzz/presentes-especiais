@@ -101,6 +101,26 @@ export interface ConversationState {
    * isto fica: é o registro de que a triagem terminou (o CRM qualifica o lead como quente por ele).
    */
   orcamentoEnviado?: FichaPedido["resumo"] & { enviado_em: string };
+  /**
+   * Quantas vezes um cliente que já comprou começou um pedido novo (iniciar_novo_pedido). O CRM compara com o
+   * ciclo do lead: subiu, o lead volta para prospecção e qualificação. Ausente = 0 (nunca recomeçou).
+   */
+  ciclo?: number;
+  /** Quando o pedido novo em andamento começou: o que veio antes dele é de pedidos anteriores. */
+  novoPedidoIniciadoEm?: string;
+  /** Resumo dos pedidos anteriores (o que foi apurado antes de cada iniciar_novo_pedido), o mais recente por último. */
+  pedidosAnteriores?: Array<{
+    encerrado_em: string;
+    ocasiao?: string;
+    quantidade?: number;
+    produtos: string[];
+    total_estimado?: number;
+  }>;
+  /**
+   * A última transferência para uma pessoa. A pendente some ao concluir o turno; esta fica para o CRM saber o
+   * motivo (reclamação e cancelamento/estorno marcam o contato como urgente).
+   */
+  ultimaTransferencia?: { motivo: string; prioridade: "normal" | "alta"; observacao?: string; em: string };
   falhasConsecutivas: number;
   falhasValidacaoPedido: number;
   /** Consultas de pedido nesta conversa — teto contra varredura de códigos. */

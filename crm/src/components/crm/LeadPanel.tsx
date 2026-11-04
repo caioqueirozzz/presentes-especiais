@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePortal } from "@/components/portal/Portal";
-import { Avatar, Button, EmptyState, ErrorNote, Label, Modal, QualificationBadge, Segmented, TemperatureBadge, inputClass } from "@/components/ui";
+import { Avatar, Button, CustomerBadges, EmptyState, ErrorNote, Label, Modal, QualificationBadge, Segmented, TemperatureBadge, UrgentBadge, inputClass } from "@/components/ui";
+import { ORDER_STAGE_LABELS } from "@/lib/orders";
+import type { OrderStage } from "@/lib/orders";
 import { api, useApi } from "@/lib/client/api";
-import { STAGES, STAGE_LABELS, formatDateTime, formatMoney, formatPhone, leadDisplayName, relativeTime } from "@/lib/types";
+import { STAGES, STAGE_LABELS, customerStatus, formatDateTime, formatMoney, formatPhone, leadDisplayName, relativeTime } from "@/lib/types";
 import type { Lead, LeadEvent, Message, Stage } from "@/lib/types";
 
 interface LeadDetail {
@@ -62,9 +64,15 @@ export function LeadPanel({
             {lead.customer_type && ` · ${lead.customer_type}`}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <TemperatureBadge score={lead.lead_score} />
-            <QualificationBadge status={lead.qualification_status} />
-            <span className="rounded-full border border-outline-variant/50 px-2 py-0.5 text-[10px] font-semibold text-on-surface-variant">{STAGE_LABELS[lead.stage]}</span>
+            <UrgentBadge lead={lead} />
+            {customerStatus(lead).showQualification && (
+              <>
+                <TemperatureBadge score={lead.lead_score} />
+                <QualificationBadge status={lead.qualification_status} />
+                <span className="rounded-full border border-outline-variant/50 px-2 py-0.5 text-[10px] font-semibold text-on-surface-variant">{STAGE_LABELS[lead.stage]}</span>
+              </>
+            )}
+            <CustomerBadges lead={lead} />
             {lead.agent_mode === "humano" ? (
               <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">Atendimento humano</span>
             ) : (
@@ -83,9 +91,11 @@ export function LeadPanel({
         </a>
       </header>
 
-      {lead.needs_attention && (
+      {lead.is_urgent && <UrgentBar lead={lead} onResolved={refresh} />}
+      {lead.needs_attention && !lead.is_urgent && (
         <AttentionBar lead={lead} onResolved={refresh} />
       )}
+      <OrdersStrip lead={lead} />
 
       <div className="px-5 pt-4">
         <Segmented
@@ -197,6 +207,57 @@ function Composer({ lead, connected, onSent }: { lead: Lead; connected: boolean;
           O WhatsApp da loja não está conectado ao CRM. Peça à administração para vincular em CRM › Conexão WhatsApp.
         </p>
       )}
+    </div>
+  );
+}
+
+function UrgentBar({ lead, onResolved }: { lead: Lead; onResolved: () => void }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="mx-5 mt-4 flex items-center gap-3 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-[13px] text-red-900">
+      <span className="material-symbols-outlined text-[20px]">priority_high</span>
+      <span className="flex-1">
+        <b className="font-semibold">Contato urgente.</b> {lead.urgent_reason}
+        {lead.agent_mode === "humano" && " A Lia não está respondendo esta conversa."}
+      </span>
+      <button
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          await api(`/api/leads/${lead.id}`, { method: "PATCH", body: { is_urgent: false, needs_attention: false } }).catch(() => {});
+          onResolved();
+        }}
+        className="rounded-full border border-red-300 px-3 py-1 text-[12px] font-semibold hover:bg-red-100"
+      >
+        Resolvido
+      </button>
+    </div>
+  );
+}
+
+/** Os pedidos em andamento deste cliente, cada um pelo código: o pedido novo em qualificação não se mistura com eles. */
+function OrdersStrip({ lead }: { lead: Lead }) {
+  const { isCustomer, activeOrders, newOrderInProgress } = customerStatus(lead);
+  if (!isCustomer) return null;
+  return (
+    <div className="mx-5 mt-4 rounded-xl border border-outline-variant/40 px-4 py-3 text-[12px] text-on-surface-variant">
+      {activeOrders.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-semibold text-on-surface">Pedidos em andamento:</span>
+          {activeOrders.map((o) => (
+            <span key={o.code} className="rounded-full bg-green-50 px-2 py-0.5 font-semibold text-green-700">
+              {o.code} · {ORDER_STAGE_LABELS[o.stage as OrderStage] ?? o.stage}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p>Todos os pedidos deste cliente foram entregues.</p>
+      )}
+      <p className="mt-1">
+        {newOrderInProgress
+          ? "O cliente começou um pedido novo: a qualificação acima é deste pedido novo, separado dos que já existem."
+          : "Se o cliente voltar para comprar, a Lia abre um pedido novo e a qualificação volta a aparecer."}
+      </p>
     </div>
   );
 }
@@ -607,6 +668,8 @@ const EVENT_TEXT: Record<string, (e: LeadEvent) => string> = {
       : `Temperatura ajustada para ${e.data.score ?? "automática"}`,
   ATENDIMENTO: (e) => (e.data.modo === "ia" ? `Conversa devolvida para a Lia${e.data.nota ? ` · nota: ${e.data.nota}` : ""}` : "Equipe assumiu a conversa (a Lia pausou)"),
   PROXIMO_PASSO: (e) => (e.data.acao ? `Próximo passo: ${e.data.acao}${e.data.em ? ` (${formatDateTime(e.data.em as string)})` : ""}` : "Próximo passo removido"),
+  URGENCIA: (e) => (e.data.resolvida ? `Urgência resolvida${e.data.motivo ? ` · ${e.data.motivo}` : ""}` : `Marcado como urgente · ${e.data.motivo ?? ""}`),
+  NOVO_PEDIDO: (e) => `Cliente voltou para um novo pedido (ciclo ${e.data.ciclo}): lead de volta à prospecção`,
 };
 
 const EVENT_ICONS: Record<string, string> = {
@@ -617,6 +680,8 @@ const EVENT_ICONS: Record<string, string> = {
   QUALIFICACAO: "device_thermostat",
   PROXIMO_PASSO: "event",
   ATENDIMENTO: "support_agent",
+  URGENCIA: "priority_high",
+  NOVO_PEDIDO: "replay",
 };
 
 function History({ leadId, events, onAdded }: { leadId: string; events: LeadEvent[]; onAdded: () => void }) {

@@ -28,21 +28,25 @@ function brDate(iso: string | null): string | null {
  *
  * Pedido atrasado consultado = cliente perguntou por um pedido fora do prazo: a gestão e o vendedor
  * do lead recebem um aviso e o card ganha o "*" (late_alert_at) até alguém resolver.
+ *
+ * ?contexto=1: a Lia lendo o histórico do cliente antes de responder (é cliente? qual pedido está em
+ * andamento?). Traz também os entregues antigos e não avisa atraso: o cliente não perguntou nada.
  */
 export async function GET(request: Request) {
   if (!authorized(request)) return jsonError("Não autorizado.", 401);
   const phone = (new URL(request.url).searchParams.get("telefone") ?? "").replace(/\D/g, "");
   if (phone.length < 10) return jsonError("Telefone inválido.", 400);
+  const context = new URL(request.url).searchParams.get("contexto") === "1";
   try {
     const orders = await query<Order>(
       `SELECT ${ORDER_COLUMNS} FROM orders o
-       WHERE o.phone = ANY($1) AND (o.stage <> 'ENTREGUE' OR o.stage_changed_at > NOW() - make_interval(days => $2))
+       WHERE o.phone = ANY($1) AND ($3::boolean OR o.stage <> 'ENTREGUE' OR o.stage_changed_at > NOW() - make_interval(days => $2))
        ORDER BY (o.stage = 'ENTREGUE'), o.created_at DESC LIMIT 10`,
-      [phoneVariants(phone), DELIVERED_DAYS]
+      [phoneVariants(phone), DELIVERED_DAYS, context]
     );
     const today = todaySP();
     const isLate = (o: Order) => Boolean(o.due_date && o.stage !== "ENTREGUE" && o.due_date < today);
-    await alertLate(orders.filter(isLate));
+    if (!context) await alertLate(orders.filter(isLate));
     const pedidos = orders.map((o) => {
       const index = ORDER_STAGES.findIndex((s) => s.value === o.stage);
       const stage = ORDER_STAGES[index];
@@ -57,8 +61,11 @@ export async function GET(request: Request) {
         previsao_entrega: brDate(o.due_date),
         atrasado: isLate(o),
         // Atrasado: a equipe já foi avisada agora (ou nas últimas 24h); a Lia diz isso ao cliente
-        ...(isLate(o) ? { equipe_avisada: true } : {}),
+        ...(isLate(o) && !context ? { equipe_avisada: true } : {}),
         recado_da_equipe: o.client_note,
+        // O pedido termina em Entregue; criado_em separa os pedidos que já existiam do pedido novo
+        entregue: o.stage === "ENTREGUE",
+        criado_em: new Date(o.created_at).toISOString(),
       };
     });
     return NextResponse.json({ pedidos });

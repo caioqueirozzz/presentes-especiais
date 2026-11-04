@@ -12,6 +12,7 @@ import { registrarArteSchema, registrarArteHandler } from "./registrarArte.js";
 import { transferirHumanoSchema, transferirHumanoHandler } from "./transferirHumano.js";
 import { registrarContextoSchema, registrarContextoHandler } from "./registrarContexto.js";
 import { andamentoPedidoSchema, andamentoPedidoHandler } from "./andamentoPedido.js";
+import { iniciarNovoPedidoSchema, iniciarNovoPedidoHandler } from "./iniciarNovoPedido.js";
 
 /**
  * Schema da ferramenta no formato que a OpenAI aceita.
@@ -104,9 +105,17 @@ export const tools: ToolDefinition[] = [
     handler: registrarContextoHandler as ToolDefinition["handler"],
   },
   {
+    name: "iniciar_novo_pedido",
+    description:
+      "Abre um pedido NOVO para quem já é cliente (cliente_da_loja.ja_cliente) ou já recebeu uma estimativa (orcamento_ja_enviado_a_equipe), quando ele quer comprar de novo — inclusive com outro pedido ainda em produção. Guarda o que foi apurado antes e limpa necessidade, produtos e estimativa, mantendo os dados do cliente. Chame antes de buscar_produtos quando o cliente que já comprou pedir produto, preço ou orçamento novo. Não use para perguntas sobre um pedido que já existe (andamento_pedido), nem para reclamação, troca, cancelamento ou estorno (transferir_humano).",
+    inputSchema: schemaDaFerramenta(iniciarNovoPedidoSchema),
+    schema: iniciarNovoPedidoSchema,
+    handler: iniciarNovoPedidoHandler as ToolDefinition["handler"],
+  },
+  {
     name: "transferir_humano",
     description:
-      "Transfere o atendimento para um humano. Use quando: o cliente confirmar a estimativa de preparar_orcamento (motivo orcamento_para_emitir: a equipe emite o orçamento), pedir status de orçamento, o cliente pedir atendente (motivo pedido_cliente), houver reclamação, 2 falhas seguidas de ferramenta, desconto/pagamento/frete específico, arte problemática ou intenção não entendida após 2 tentativas.",
+      "Transfere o atendimento para um humano. Use quando: o cliente confirmar a estimativa de preparar_orcamento (motivo orcamento_para_emitir: a equipe emite o orçamento), pedir status de orçamento, o cliente pedir atendente (motivo pedido_cliente), houver reclamação (motivo reclamacao, prioridade alta), pedido de cancelamento ou estorno (motivo cancelamento_estorno, prioridade alta), 2 falhas seguidas de ferramenta, desconto/pagamento/frete específico, arte problemática ou intenção não entendida após 2 tentativas.",
     inputSchema: schemaDaFerramenta(transferirHumanoSchema),
     schema: transferirHumanoSchema,
     handler: transferirHumanoHandler as ToolDefinition["handler"],

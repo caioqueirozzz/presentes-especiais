@@ -7,9 +7,9 @@ import { usePortal } from "@/components/portal/Portal";
 import { StageModal } from "@/components/crm/LeadPanel";
 import { OrdersBoard } from "./OrdersBoard";
 import { WonLeadModal } from "./WonLeadModal";
-import { Avatar, ErrorNote, PageHeader, Segmented, TemperatureBadge } from "@/components/ui";
+import { Avatar, CustomerBadges, ErrorNote, PageHeader, Segmented, TemperatureBadge, UrgentBadge } from "@/components/ui";
 import { api, useApi } from "@/lib/client/api";
-import { STAGES, formatMoney, leadDisplayName, leadTemperature, relativeTime } from "@/lib/types";
+import { STAGES, customerStatus, formatMoney, leadDisplayName, leadTemperature, relativeTime } from "@/lib/types";
 import type { Lead, LeadTemperature, Stage } from "@/lib/types";
 
 type View = "qualificacao" | "prospeccao" | "pedidos";
@@ -64,12 +64,14 @@ function Card({ lead, dragging, onDragStart, onDragEnd, showOwner, footer, onOpe
       >
         <div className="mb-2 flex items-start justify-between gap-2">
           <p className="line-clamp-2 text-[14px] font-semibold text-on-surface">{leadDisplayName(lead)}</p>
-          <TemperatureBadge score={lead.lead_score} compact />
+          {customerStatus(lead).showQualification && <TemperatureBadge score={lead.lead_score} compact />}
         </div>
         {lead.qualification_summary && <p className="mb-3 line-clamp-2 text-[12px] text-on-surface-variant">{lead.qualification_summary}</p>}
         <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
           {lead.estimated_value ? <span className="rounded-full bg-on-surface/[0.05] px-2 py-0.5 font-semibold text-primary">{formatMoney(lead.won_value ?? lead.estimated_value, true)}</span> : null}
-          {lead.qualification_status === "IN_PROGRESS" && <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-800">Lia qualificando</span>}
+          <UrgentBadge lead={lead} />
+          {customerStatus(lead).showQualification && lead.qualification_status === "IN_PROGRESS" && <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-800">Lia qualificando</span>}
+          <CustomerBadges lead={lead} />
           {lead.needs_attention && <span className="rounded-full bg-amber-50 px-2 py-0.5 font-semibold text-amber-800">atenção</span>}
           {lead.next_action_at && (
             <span className={`rounded-full px-2 py-0.5 ${overdue ? "bg-red-50 font-semibold text-red-700" : "bg-on-surface/[0.05] text-on-surface-variant"}`}>

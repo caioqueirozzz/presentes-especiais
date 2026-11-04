@@ -53,13 +53,14 @@ export async function GET(request: Request) {
   }
   if (url.searchParams.get("attention") === "1") conds.push("l.needs_attention");
   if (url.searchParams.get("waiting") === "1") conds.push("l.last_message_from_client");
+  if (url.searchParams.get("urgent") === "1") conds.push("l.is_urgent");
 
   const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 300));
   try {
     const leads = await query<Lead>(
       `SELECT ${LEAD_COLUMNS} FROM leads l LEFT JOIN users u ON u.id = l.assigned_to
        WHERE ${conds.join(" AND ")}
-       ORDER BY l.needs_attention DESC, l.last_message_at DESC NULLS LAST, l.created_at DESC
+       ORDER BY l.is_urgent DESC, l.needs_attention DESC, l.last_message_at DESC NULLS LAST, l.created_at DESC
        LIMIT ${limit}`,
       params
     );

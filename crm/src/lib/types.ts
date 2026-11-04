@@ -64,6 +64,17 @@ export interface Lead {
   last_message_text: string | null;
   last_message_at: string | null;
   last_message_from_client: boolean | null;
+  /** Reclamação ou cancelamento/estorno: vai para o topo da lista até alguém resolver */
+  is_urgent: boolean;
+  urgent_reason: string | null;
+  urgent_at: string | null;
+  /** Ciclo de compra: sobe quando o cliente que já comprou começa um pedido novo */
+  purchase_cycle: number;
+  cycle_started_at: string | null;
+  /** Do quadro de Pedidos (calculados em LEAD_COLUMNS) */
+  orders_total: number;
+  active_orders: Array<{ code: string; stage: string }> | null;
+  last_order_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -137,6 +148,23 @@ export const STAGES: { value: Stage; label: string; icon: string }[] = [
 
 export const STAGE_LABELS = Object.fromEntries(STAGES.map((s) => [s.value, s.label])) as Record<Stage, string>;
 export const OPEN_STAGES: Stage[] = ["NOVO", "ATENDIMENTO", "ORCAMENTO", "ARTE", "NEGOCIACAO"];
+
+/**
+ * Em que pé está o cliente em relação aos pedidos.
+ * - "Já cliente": tem pedido no quadro (em andamento ou entregue).
+ * - "Pedido confirmado": tem pedido ainda não entregue. O pedido termina quando vai para Entregue.
+ * - A qualificação (temperatura e status) some enquanto o ciclo atual já virou pedido e volta
+ *   quando o cliente começa um pedido novo (cycle_started_at depois do último pedido),
+ *   mesmo com outro pedido ainda em produção.
+ */
+export function customerStatus(lead: Pick<Lead, "orders_total" | "active_orders" | "last_order_at" | "cycle_started_at">) {
+  const isCustomer = (lead.orders_total ?? 0) > 0;
+  const activeOrders = lead.active_orders ?? [];
+  const newOrderInProgress = Boolean(
+    isCustomer && lead.cycle_started_at && lead.last_order_at && new Date(lead.cycle_started_at).getTime() > new Date(lead.last_order_at).getTime()
+  );
+  return { isCustomer, activeOrders, newOrderInProgress, showQualification: !isCustomer || newOrderInProgress };
+}
 
 /** Qualificado e sem vendedor: a fila que o admin precisa esvaziar */
 export function isAwaitingSeller(lead: Pick<Lead, "qualification_status" | "assigned_to">): boolean {

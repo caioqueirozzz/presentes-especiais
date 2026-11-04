@@ -12,6 +12,7 @@ export const NOMES_FERRAMENTAS = [
   "consultar_pedido",
   "registrar_arte",
   "registrar_contexto",
+  "iniciar_novo_pedido",
   "transferir_humano",
 ] as const;
 

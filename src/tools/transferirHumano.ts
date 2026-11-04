@@ -7,6 +7,7 @@ export const MOTIVOS = [
   "orcamento_para_emitir",
   "pedido_cliente",
   "reclamacao",
+  "cancelamento_estorno",
   "desconto",
   "pagamento",
   "frete_prazo",
@@ -30,6 +31,13 @@ export type MotivoTransferencia = (typeof MOTIVOS)[number];
 
 export const MENSAGEM_TRANSFERENCIA =
   "Vou te conectar com um atendente agora. Em instantes alguém da nossa equipe entrará em contato! 😊";
+
+/**
+ * Cancelamento e estorno nunca passam pelo modelo (runTurn transfere antes): este é o único texto que sai.
+ * Não promete nem nega nada sobre o pedido; só avisa que uma pessoa vai cuidar.
+ */
+export const MENSAGEM_CANCELAMENTO =
+  "Entendi. Cancelamentos e estornos são tratados diretamente pela nossa equipe: já passei sua conversa para uma pessoa, que vai falar com você em instantes. 🙏";
 
 export interface ResumoTransferencia {
   conversaId: string;
@@ -118,6 +126,12 @@ export async function transferirHumanoHandler(
   };
 
   state.modo = "humano";
+  state.ultimaTransferencia = {
+    motivo: input.motivo,
+    prioridade: input.prioridade,
+    ...(input.observacao ? { observacao: input.observacao } : {}),
+    em: resumo.transferido_em,
+  };
   if (input.motivo === "orcamento_para_emitir" && state.fichaPedido) {
     state.orcamentoEnviado = { ...state.fichaPedido.resumo, enviado_em: resumo.transferido_em };
   }

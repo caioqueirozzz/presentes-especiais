@@ -55,6 +55,20 @@ A partir daí:
 
 Sem a ponte rodando, a tela de conexão mostra como ligá-la. `npm run sync:agente` continua disponível para importar conversas antigas dos arquivos; ele não duplica o que já veio ao vivo.
 
+## Clientes que voltam
+
+| Situação | No CRM | Na Lia |
+|---|---|---|
+| Pedido cadastrado no quadro (Pedido confirmado → … → Expedição) | Temperatura e qualificação somem; aparecem **Pedido confirmado** e **Já cliente** | `cliente_da_loja` no prompt traz os pedidos em andamento pelo código |
+| Pedido movido para **Entregue** | Fica só **Já cliente** (o pedido terminou) | O pedido vai para `pedidos_entregues` |
+| Cliente volta para comprar (mesmo com outro pedido em produção) | Lead volta para *Novo contato* e *Em qualificação*; a venda anterior vai para `lead_sales` e continua nos relatórios | Chama `iniciar_novo_pedido`: limpa a triagem e mantém nome, PF/PJ e e-mail |
+| Reclamação de quem já é cliente (palavras-chave) | **Urgente** no topo da lista, com aviso à gestão e ao vendedor | Transfere com motivo `reclamacao`, prioridade alta |
+| Cancelamento ou estorno (palavras-chave) | **Urgente** para qualquer contato | **Não responde**: transfere antes de chamar o modelo, com uma mensagem fixa de encaminhamento |
+
+As palavras-chave ficam em `src/lib/intencao.ts`, que é uma cópia idêntica de `../src/agent/intencao.ts`. O teste `tests/clientesRecorrentes.test.ts` falha se as duas divergirem. "Resolvido" na faixa vermelha do lead tira a urgência.
+
+Depois de atualizar, rode `npm run db:migrate` (migration `005_clientes_recorrentes.sql`).
+
 ## Permissões
 
 Não há RLS no Neon: toda leitura passa por `src/lib/access.ts`, que deriva o escopo **da sessão**.

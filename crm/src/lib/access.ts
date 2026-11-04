@@ -62,7 +62,11 @@ export function leadScope(user: SessionUser, params: unknown[], alias = "l"): st
 }
 
 export const LEAD_COLUMNS = `
-  l.*, u.name AS assigned_name
+  l.*, u.name AS assigned_name,
+  (SELECT COUNT(*)::int FROM orders o WHERE o.lead_id = l.id) AS orders_total,
+  (SELECT json_agg(json_build_object('code', o.code, 'stage', o.stage) ORDER BY o.created_at)
+     FROM orders o WHERE o.lead_id = l.id AND o.stage <> 'ENTREGUE') AS active_orders,
+  (SELECT MAX(o.created_at) FROM orders o WHERE o.lead_id = l.id) AS last_order_at
 `;
 
 /** Lead, se o usuário puder vê-lo. */

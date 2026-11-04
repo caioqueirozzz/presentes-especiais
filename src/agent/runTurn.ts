@@ -13,7 +13,10 @@ import {
   exigeTransferenciaImediata,
 } from "../integrations/brindeme/errors.js";
 import { config } from "../config.js";
+import { detectarIntencao } from "./intencao.js";
+import { clienteDaLoja, historicoDoCliente, type PedidoDoCliente } from "../integrations/crm/historicoCliente.js";
 import {
+  MENSAGEM_CANCELAMENTO,
   MENSAGEM_TRANSFERENCIA,
   MOTIVOS,
   transferirHumanoHandler,
@@ -46,6 +49,7 @@ const COBRANCA_DE_TRANSFERENCIA =
 const EFEITOS: Record<string, string> = {
   registrar_arte: "arte_registrada",
   transferir_humano: "transferido",
+  iniciar_novo_pedido: "novo_pedido_iniciado",
 };
 
 /** A API do modelo recusa mensagem vazia, dois papéis iguais seguidos e conversa que começa pela resposta. */
@@ -96,7 +100,7 @@ export function momentoDaConversa(historico: Mensagem[]): "inicio" | "retorno" |
   return atual - ultima >= PAUSA_DE_RETORNO_MS ? "retorno" : "andamento";
 }
 
-function loadSystemPrompt(state: ConversationState): string {
+function loadSystemPrompt(state: ConversationState, pedidosDoCliente: PedidoDoCliente[] | null = null): string {
   const template = readFileSync(join(__dir, "prompt/system.md"), "utf-8");
   const stateForPrompt = {
     // Sem a data, o modelo completava "20/11" com o ano do treino (2023-11-20 na ficha, 25/10).
@@ -114,6 +118,9 @@ function loadSystemPrompt(state: ConversationState): string {
     estimativa_aguardando_confirmacao: state.fichaPedido?.resumo,
     // Memória: o cliente que volta depois do orçamento não é tratado como conversa nova.
     orcamento_ja_enviado_a_equipe: state.orcamentoEnviado,
+    // Pedidos no quadro do CRM: diz se é cliente que voltou e separa os pedidos dele do pedido novo
+    cliente_da_loja: clienteDaLoja(pedidosDoCliente, state.novoPedidoIniciadoEm),
+    pedidos_anteriores_nesta_conversa: state.pedidosAnteriores,
   };
 
   return template
@@ -159,7 +166,33 @@ export async function runTurn(
     return { response: null, toolsCalled: [], transferred: false, lacunas: [] };
   }
 
-  const systemPrompt = loadSystemPrompt(state);
+  // Cancelamento e estorno nunca passam pelo modelo: vão direto para uma pessoa, com prioridade alta.
+  const sinal = detectarIntencao(userMessage);
+  if (sinal?.tipo === "cancelamento") {
+    const input = {
+      motivo: "cancelamento_estorno" as const,
+      prioridade: "alta" as const,
+      observacao: `cliente pediu cancelamento ou estorno ("${sinal.termo}"): a Lia não respondeu`,
+    };
+    const o = await transferirHumanoHandler(input, state, client);
+    logger.log({ type: "tool_call", name: "transferir_humano", input, output: o, duration_ms: 0 });
+    if (o.status === "transferido") {
+      opcoes.aoTransferir?.(o.resumo_para_atendente, []);
+      opcoes.aoEfeito?.();
+      logger.log({ type: "response_sent", content: MENSAGEM_CANCELAMENTO, input_tokens: 0, output_tokens: 0 });
+      addMessage(state, "assistant", MENSAGEM_CANCELAMENTO);
+      return {
+        response: MENSAGEM_CANCELAMENTO,
+        toolsCalled: [{ name: "transferir_humano", inputSummary: JSON.stringify(input).slice(0, 120) }],
+        transferred: true,
+        transferencia: o.resumo_para_atendente,
+        lacunas: [],
+      };
+    }
+  }
+
+  const pedidosDoCliente = await esperarOuCancelar(historicoDoCliente(state.telefone), opcoes.signal);
+  const systemPrompt = loadSystemPrompt(state, pedidosDoCliente);
 
   const llmTools = tools.map((t) => ({
     name: t.name,

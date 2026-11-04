@@ -2,8 +2,10 @@
 
 import { useEffect } from "react";
 import type { ReactNode } from "react";
-import { QUALIFICATION_LABELS, TEMPERATURE_STYLES, initials, leadTemperature } from "@/lib/types";
-import type { QualificationStatus } from "@/lib/types";
+import { ORDER_STAGE_LABELS } from "@/lib/orders";
+import type { OrderStage } from "@/lib/orders";
+import { QUALIFICATION_LABELS, TEMPERATURE_STYLES, customerStatus, initials, leadTemperature } from "@/lib/types";
+import type { Lead, QualificationStatus } from "@/lib/types";
 
 /* Peças visuais reaproveitadas pelas páginas (mesma linguagem do dcimob) */
 
@@ -102,6 +104,41 @@ export function QualificationBadge({ status }: { status: QualificationStatus }) 
     DISQUALIFIED: "border-red-200 bg-red-50 text-red-700",
   }[status];
   return <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${cls}`}>{QUALIFICATION_LABELS[status]}</span>;
+}
+
+/** Reclamação ou cancelamento/estorno: alguém precisa falar com o cliente já */
+export function UrgentBadge({ lead }: { lead: Pick<Lead, "is_urgent" | "urgent_reason"> }) {
+  if (!lead.is_urgent) return null;
+  return (
+    <span title={lead.urgent_reason ?? undefined} className="inline-flex items-center gap-1 rounded-full border border-red-300 bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white">
+      <span className="material-symbols-outlined text-[12px]">priority_high</span>Urgente
+    </span>
+  );
+}
+
+/**
+ * "Já cliente" e "Pedido confirmado" (pedido ainda não entregue). Quem já comprou e está no meio de
+ * um pedido novo mostra estas tags junto da qualificação.
+ */
+export function CustomerBadges({ lead }: { lead: Parameters<typeof customerStatus>[0] }) {
+  const { isCustomer, activeOrders } = customerStatus(lead);
+  if (!isCustomer) return null;
+  return (
+    <>
+      {activeOrders.length > 0 && (
+        <span
+          title={activeOrders.map((o) => `${o.code} · ${ORDER_STAGE_LABELS[o.stage as OrderStage] ?? o.stage}`).join("\n")}
+          className="inline-flex items-center gap-1 rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700"
+        >
+          <span className="material-symbols-outlined text-[12px]">task_alt</span>
+          {activeOrders.length > 1 ? `${activeOrders.length} pedidos confirmados` : "Pedido confirmado"}
+        </span>
+      )}
+      <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-800">
+        <span className="material-symbols-outlined text-[12px]">workspace_premium</span>Já cliente
+      </span>
+    </>
+  );
 }
 
 export function Avatar({ name, size = 36 }: { name: string | null; size?: number }) {

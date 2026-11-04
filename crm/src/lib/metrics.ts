@@ -29,6 +29,36 @@ function scoped(user: SessionUser) {
   return { params, where };
 }
 
+/**
+ * Pedidos fechados como linhas (seller_id, value, won_at): o do ciclo atual de cada lead (leads.won_*) e os
+ * de ciclos anteriores do cliente que voltou a comprar (lead_sales). Sem isso, a venda anterior sumiria
+ * dos números quando o lead volta para a prospecção.
+ */
+const ALL_SALES = `(
+  SELECT l.assigned_to AS seller_id, l.won_value AS value, l.won_at FROM leads l WHERE l.stage = 'GANHO' AND l.won_at IS NOT NULL
+  UNION ALL
+  SELECT s.seller_id, s.value, s.won_at FROM lead_sales s
+)`;
+
+/** As vendas que o usuário pode ver: admin todas; colaborador só as dele. Acrescenta o parâmetro em `params`. */
+function salesFor(user: SessionUser, params: unknown[]): string {
+  if (isAdmin(user)) return ALL_SALES;
+  params.push(user.id);
+  return `(SELECT * FROM ${ALL_SALES} v WHERE v.seller_id = $${params.length})`;
+}
+
+async function salesSince(user: SessionUser, since: string): Promise<{ valor: number; pedidos: number }> {
+  const params: unknown[] = [];
+  const sales = salesFor(user, params);
+  params.push(since);
+  return (
+    (await one<{ valor: number; pedidos: number }>(
+      `SELECT COALESCE(SUM(v.value), 0)::float8 AS valor, COUNT(*)::int AS pedidos FROM ${sales} v WHERE v.won_at >= $${params.length}`,
+      params
+    )) ?? { valor: 0, pedidos: 0 }
+  );
+}
+
 async function leadList(user: SessionUser, extra: string, extraParams: unknown[], order: string, limit = 6): Promise<Lead[]> {
   const { params, where } = scoped(user);
   const offset = params.length;
@@ -55,14 +85,18 @@ export async function stageCounts(user: SessionUser): Promise<Record<Stage, { co
   return out;
 }
 
-/** Leads recebidos por dia (últimos `days`) */
+/** Leads recebidos (created_at) ou pedidos fechados (won_at) por dia, nos últimos `days` */
 async function dailySeries(user: SessionUser, days: number, column: "created_at" | "won_at") {
-  const { params, where } = scoped(user);
+  const params: unknown[] = [];
+  const source =
+    column === "won_at"
+      ? salesFor(user, params)
+      : `(SELECT l.created_at, l.won_value AS value FROM leads l WHERE ${leadScope(user, params)})`;
   params.push(dayStart(days - 1).toISOString());
   const rows = await query<{ day: string; count: number; value: number }>(
-    `SELECT to_char(${column} - INTERVAL '3 hours', 'YYYY-MM-DD') AS day, COUNT(*)::int AS count,
-            COALESCE(SUM(won_value), 0)::float8 AS value
-     FROM leads l WHERE ${where} AND ${column} >= $${params.length} ${column === "won_at" ? "AND stage = 'GANHO'" : ""}
+    `SELECT to_char(v.${column} - INTERVAL '3 hours', 'YYYY-MM-DD') AS day, COUNT(*)::int AS count,
+            COALESCE(SUM(v.value), 0)::float8 AS value
+     FROM ${source} v WHERE v.${column} >= $${params.length}
      GROUP BY 1`,
     params
   );
@@ -83,14 +117,12 @@ export async function adminDashboard(user: SessionUser) {
   const tomorrow = dayStart(-1).toISOString();
   const month = monthStart().toISOString();
 
-  const [kpi, awaiting, attention, ranking, stages, series, temps, dueToday] = await Promise.all([
+  const [leadKpi, monthSales, awaiting, attention, ranking, stages, series, temps, dueToday] = await Promise.all([
     one<{
       novos_hoje: number;
       aguardando: number;
       atencao: number;
       pipeline: number;
-      ganho_mes: number;
-      pedidos_mes: number;
       recebidos_mes: number;
       nao_lidas: number;
     }>(
@@ -99,19 +131,18 @@ export async function adminDashboard(user: SessionUser) {
          COUNT(*) FILTER (WHERE qualification_status = 'QUALIFIED' AND assigned_to IS NULL AND stage NOT IN ('GANHO','PERDIDO'))::int AS aguardando,
          COUNT(*) FILTER (WHERE needs_attention)::int AS atencao,
          COALESCE(SUM(estimated_value) FILTER (WHERE stage IN ('NOVO','ATENDIMENTO','ORCAMENTO','ARTE','NEGOCIACAO')), 0)::float8 AS pipeline,
-         COALESCE(SUM(won_value) FILTER (WHERE stage = 'GANHO' AND won_at >= $2), 0)::float8 AS ganho_mes,
-         COUNT(*) FILTER (WHERE stage = 'GANHO' AND won_at >= $2)::int AS pedidos_mes,
          COUNT(*) FILTER (WHERE created_at >= $2)::int AS recebidos_mes,
          COALESCE(SUM(unread_count), 0)::int AS nao_lidas
        FROM leads`,
       [today, month]
     ),
+    salesSince(user, month),
     leadList(user, "l.qualification_status = 'QUALIFIED' AND l.assigned_to IS NULL AND l.stage NOT IN ('GANHO','PERDIDO')", [], "l.lead_score DESC NULLS LAST, l.last_message_at DESC NULLS LAST"),
     leadList(user, "l.needs_attention", [], "l.last_message_at DESC NULLS LAST"),
     query<{ id: string; name: string; ganho: number; pedidos: number; ativos: number; meta: number | null; atrasados: number }>(
       `SELECT u.id, u.name, u.monthly_goal::float8 AS meta,
-         COALESCE(SUM(l.won_value) FILTER (WHERE l.stage = 'GANHO' AND l.won_at >= $1), 0)::float8 AS ganho,
-         COUNT(l.id) FILTER (WHERE l.stage = 'GANHO' AND l.won_at >= $1)::int AS pedidos,
+         COALESCE((SELECT SUM(v.value) FROM ${ALL_SALES} v WHERE v.seller_id = u.id AND v.won_at >= $1), 0)::float8 AS ganho,
+         (SELECT COUNT(*) FROM ${ALL_SALES} v WHERE v.seller_id = u.id AND v.won_at >= $1)::int AS pedidos,
          COUNT(l.id) FILTER (WHERE l.stage IN ('NOVO','ATENDIMENTO','ORCAMENTO','ARTE','NEGOCIACAO'))::int AS ativos,
          COUNT(l.id) FILTER (WHERE l.next_action_at < NOW() AND l.stage NOT IN ('GANHO','PERDIDO'))::int AS atrasados
        FROM users u LEFT JOIN leads l ON l.assigned_to = u.id
@@ -128,6 +159,7 @@ export async function adminDashboard(user: SessionUser) {
     ),
   ]);
 
+  const kpi = leadKpi && { ...leadKpi, ganho_mes: monthSales.valor, pedidos_mes: monthSales.pedidos };
   return { kpi, awaiting, attention, ranking, stages, series, temps, dueToday: dueToday?.count ?? 0 };
 }
 
@@ -138,20 +170,19 @@ export async function sellerDashboard(user: SessionUser) {
   const month = monthStart().toISOString();
   const { params, where } = scoped(user);
 
-  const [kpi, agenda, waiting, recent, stages, goal, temps] = await Promise.all([
-    one<{ ativos: number; retornos: number; atrasados: number; nao_lidas: number; ganho_mes: number; pedidos_mes: number; pipeline: number; novos_hoje: number }>(
+  const [leadKpi, monthSales, agenda, waiting, recent, stages, goal, temps] = await Promise.all([
+    one<{ ativos: number; retornos: number; atrasados: number; nao_lidas: number; pipeline: number; novos_hoje: number }>(
       `SELECT
          COUNT(*) FILTER (WHERE stage IN ('NOVO','ATENDIMENTO','ORCAMENTO','ARTE','NEGOCIACAO'))::int AS ativos,
          COUNT(*) FILTER (WHERE next_action_at < $${params.length + 1} AND stage NOT IN ('GANHO','PERDIDO'))::int AS retornos,
          COUNT(*) FILTER (WHERE next_action_at < NOW() AND stage NOT IN ('GANHO','PERDIDO'))::int AS atrasados,
          COALESCE(SUM(unread_count), 0)::int AS nao_lidas,
-         COALESCE(SUM(won_value) FILTER (WHERE stage = 'GANHO' AND won_at >= $${params.length + 3}), 0)::float8 AS ganho_mes,
-         COUNT(*) FILTER (WHERE stage = 'GANHO' AND won_at >= $${params.length + 3})::int AS pedidos_mes,
          COALESCE(SUM(estimated_value) FILTER (WHERE stage IN ('NOVO','ATENDIMENTO','ORCAMENTO','ARTE','NEGOCIACAO')), 0)::float8 AS pipeline,
          COUNT(*) FILTER (WHERE assigned_at >= $${params.length + 2})::int AS novos_hoje
        FROM leads l WHERE ${where}`,
-      [...params, tomorrow, today, month]
+      [...params, tomorrow, today]
     ),
+    salesSince(user, month),
     leadList(user, "l.next_action_at < $1 AND l.stage NOT IN ('GANHO','PERDIDO')", [tomorrow], "l.next_action_at ASC", 8),
     leadList(user, "l.last_message_from_client AND l.stage NOT IN ('GANHO','PERDIDO')", [], "l.lead_score DESC NULLS LAST, l.last_message_at ASC", 6),
     leadList(user, "l.assigned_at IS NOT NULL", [], "l.assigned_at DESC", 5),
@@ -160,6 +191,7 @@ export async function sellerDashboard(user: SessionUser) {
     temperatureCounts(user),
   ]);
 
+  const kpi = leadKpi && { ...leadKpi, ganho_mes: monthSales.valor, pedidos_mes: monthSales.pedidos };
   return { kpi, agenda, waiting, recent, stages, goal: goal?.meta ?? null, temps };
 }
 
@@ -188,18 +220,17 @@ export async function report(user: SessionUser, days: number) {
   const p = (extra: unknown[]) => [...s.params, ...extra];
   const n = s.params.length;
 
-  const [totals, byOccasion, lost, received, won, bySeller, assignTime] = await Promise.all([
-    one<{ recebidos: number; qualificados: number; ganhos: number; perdidos: number; valor_ganho: number; desqualificados: number }>(
+  const [leadTotals, periodSales, byOccasion, lost, received, won, bySeller, assignTime] = await Promise.all([
+    one<{ recebidos: number; qualificados: number; perdidos: number; desqualificados: number }>(
       `SELECT
          COUNT(*) FILTER (WHERE created_at >= $${n + 1})::int AS recebidos,
          COUNT(*) FILTER (WHERE qualified_at >= $${n + 1})::int AS qualificados,
-         COUNT(*) FILTER (WHERE stage = 'GANHO' AND won_at >= $${n + 1})::int AS ganhos,
          COUNT(*) FILTER (WHERE stage = 'PERDIDO' AND lost_at >= $${n + 1})::int AS perdidos,
-         COUNT(*) FILTER (WHERE qualification_status = 'DISQUALIFIED' AND updated_at >= $${n + 1})::int AS desqualificados,
-         COALESCE(SUM(won_value) FILTER (WHERE stage = 'GANHO' AND won_at >= $${n + 1}), 0)::float8 AS valor_ganho
+         COUNT(*) FILTER (WHERE qualification_status = 'DISQUALIFIED' AND updated_at >= $${n + 1})::int AS desqualificados
        FROM leads l WHERE ${s.where}`,
       p([from])
     ),
+    salesSince(user, from),
     query<{ ocasiao: string; leads: number; ganhos: number; valor: number }>(
       `SELECT COALESCE(NULLIF(qualification->>'ocasiao', ''), 'Não informada') AS ocasiao, COUNT(*)::int AS leads,
          COUNT(*) FILTER (WHERE stage = 'GANHO')::int AS ganhos, COALESCE(SUM(won_value), 0)::float8 AS valor
@@ -219,9 +250,9 @@ export async function report(user: SessionUser, days: number) {
       ? query<{ id: string; name: string; recebidos: number; ganhos: number; perdidos: number; valor: number; ativos: number }>(
           `SELECT u.id, u.name,
              COUNT(l.id) FILTER (WHERE l.assigned_at >= $1)::int AS recebidos,
-             COUNT(l.id) FILTER (WHERE l.stage = 'GANHO' AND l.won_at >= $1)::int AS ganhos,
+             (SELECT COUNT(*) FROM ${ALL_SALES} v WHERE v.seller_id = u.id AND v.won_at >= $1)::int AS ganhos,
              COUNT(l.id) FILTER (WHERE l.stage = 'PERDIDO' AND l.lost_at >= $1)::int AS perdidos,
-             COALESCE(SUM(l.won_value) FILTER (WHERE l.stage = 'GANHO' AND l.won_at >= $1), 0)::float8 AS valor,
+             COALESCE((SELECT SUM(v.value) FROM ${ALL_SALES} v WHERE v.seller_id = u.id AND v.won_at >= $1), 0)::float8 AS valor,
              COUNT(l.id) FILTER (WHERE l.stage IN ('NOVO','ATENDIMENTO','ORCAMENTO','ARTE','NEGOCIACAO'))::int AS ativos
            FROM users u LEFT JOIN leads l ON l.assigned_to = u.id
            WHERE u.is_active AND u.role = 'COLABORADOR' GROUP BY u.id ORDER BY valor DESC, ganhos DESC`,
@@ -237,6 +268,7 @@ export async function report(user: SessionUser, days: number) {
       : Promise.resolve(null),
   ]);
 
+  const totals = leadTotals && { ...leadTotals, ganhos: periodSales.pedidos, valor_ganho: periodSales.valor };
   return {
     days,
     totals,
