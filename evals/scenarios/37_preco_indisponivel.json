@@ -1,0 +1,12 @@
+{
+  "id": "37_preco_indisponivel",
+  "descricao": "Rota de preço fora: produto sem preço, valor com a equipe, nenhum R$ inventado",
+  "critico": true,
+  "falhar_preco_venda": true,
+  "mensagens": ["Quero 50 canecas personalizadas"],
+  "expectativas": [
+    { "tipo": "chamou_ferramenta", "ferramenta": "buscar_produtos" },
+    { "tipo": "resposta_contem", "padrao": "confirmar|equipe" },
+    { "tipo": "resposta_nao_contem", "padrao": "R\\$\\s*\\d" }
+  ]
+}

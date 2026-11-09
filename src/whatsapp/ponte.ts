@@ -1,5 +1,6 @@
 import {
   LIMITE_TEXTO,
+  type ItemResposta,
   type MensagemLote,
   type PedidoMensagens,
   type RespostaMensagens,
@@ -15,6 +16,8 @@ import type { LogPonte } from "./log.js";
 import { salvarMidia, TAMANHO_MAXIMO_BYTES } from "./midia.js";
 import { iaAtende, type ConfigLia } from "./modoLia.js";
 import { normalizarTelefone } from "./telefone.js";
+
+const mesmaParte = (a: ItemResposta | undefined, b: ItemResposta) => JSON.stringify(a) === JSON.stringify(b);
 
 export const ESPERA_EM_ANDAMENTO_MS = 5_000;
 export const LIMITE_EM_ANDAMENTO_MS = 120_000;
@@ -173,7 +176,8 @@ export class Ponte {
     if (!observador || !m.direta || !m.telefone || m.paraMim || m.tipo === "ignorada") return;
     const autor: AutorMensagem = !m.deMim ? "CLIENTE" : this.envio.seriaMinha(m.telefone, m.texto) ? "AGENTE" : "ATENDENTE";
     try {
-      observador.mensagem({ id: m.id, telefone: m.telefone, autor, tipo: m.tipo, texto: m.texto, timestamp: m.timestamp });
+      const foto = m.deMim ? this.envio.imagemDe(m.telefone, m.texto) : undefined;
+      observador.mensagem({ id: m.id, telefone: m.telefone, autor, tipo: m.tipo, texto: foto ? `${m.texto}\n${foto}` : m.texto, timestamp: m.timestamp });
     } catch (err) {
       this.log({ type: "observador_falhou", erro: String(err) });
     }
@@ -378,7 +382,7 @@ export class Ponte {
 
     // Lote reagrupado depois de reiniciar: a resposta começa pelas partes do turno antigo, já entregues em parte.
     let jaSaiu = 0;
-    while (parcial && jaSaiu < parcial.partes.length && resposta.respostas[jaSaiu] === parcial.partes[jaSaiu]) jaSaiu++;
+    while (parcial && jaSaiu < parcial.partes.length && mesmaParte(resposta.respostas[jaSaiu], parcial.partes[jaSaiu])) jaSaiu++;
     for (let i = jaSaiu; i < resposta.respostas.length; i++) {
       const saiu = await this.envio.paraCliente(telefone, chatId, resposta.respostas[i], () => !assumiu());
       if (assumiu()) return descartar();

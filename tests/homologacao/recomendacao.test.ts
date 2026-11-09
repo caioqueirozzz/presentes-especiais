@@ -72,10 +72,8 @@ describe("H2 — precisão de preço, mínimo e estoque em todo o catálogo", ()
 
   it("H2.2 detalhar_produto dá o preço de CADA cor (a caneca preta é mais cara que a branca)", async () => {
     const r = (await detalharProdutoHandler({ produto_id: "prod-001", quantidade: 100 }, state, client)) as {
-      precos_variam_por_cor: boolean;
       subprodutos_ativos: Array<{ subproduto_id: string; preco_para_quantidade: number }>;
     };
-    expect(r.precos_variam_por_cor).toBe(true);
     const preco = Object.fromEntries(r.subprodutos_ativos.map((s) => [s.subproduto_id, s.preco_para_quantidade]));
     expect(preco).toEqual({ "sub-001-branco": 15.4, "sub-001-preto": 16.4 });
   });
@@ -122,7 +120,7 @@ describe("H2 — precisão de preço, mínimo e estoque em todo o catálogo", ()
   });
 
   it("H2.6 [correção Fase 6] quantidade fora de todas as faixas não cai no preço de referência", async () => {
-    // 10.000 canecas: a última faixa da branca vai até 9.999. Antes saía o price do produto (R$ 18,90).
+    // 10.000 canecas: fora de toda faixa, o site diz "a consultar" (0) e quem fecha é a equipe.
     const semLimite = new (class extends MockBrindeMeClient {
       async getProduct(id: string) {
         const p = await super.getProduct(id);
@@ -135,7 +133,7 @@ describe("H2 — precisão de preço, mínimo e estoque em todo o catálogo", ()
       state,
       semLimite
     )) as { erro?: string; resumo?: unknown };
-    expect(r.erro).toBe("sem_faixa_de_preco");
+    expect(r.erro).toBe("preco_indisponivel");
     expect(r.resumo).toBeUndefined();
     expect(state.fichaPedido).toBeUndefined();
   });

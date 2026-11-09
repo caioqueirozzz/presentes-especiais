@@ -3,6 +3,9 @@ import type { BrindeMeClient } from "../integrations/brindeme/client.js";
 import { translateApiError } from "../integrations/brindeme/errors.js";
 import { arredondar } from "../integrations/brindeme/mappers.js";
 import type { ConversationState } from "../agent/state.js";
+import { cotacaoValida, cotarAoVivo, cotou, guardarCotacoes, type Cotacao } from "../catalogo/cotacao.js";
+import { ehSobDemanda } from "../catalogo/sobDemanda.js";
+import { SEM_ESTOQUE_OFERECA_HUMANO } from "./cartao.js";
 import { lembrarDetalhado, marcaUltimaMensagemCliente, type FichaPedido } from "../agent/state.js";
 
 // Sem CPF, CNPJ nem endereço: quem emite o orçamento coleta no fechamento (decisão de 25/10, LGPD).
@@ -22,7 +25,7 @@ export const prepararOrcamentoSchema = z.object({
 export type PrepararOrcamentoInput = z.infer<typeof prepararOrcamentoSchema>;
 
 export const AVISO_ESTIMATIVA =
-  "Valor de tabela com personalização padrão. Personalização fora do padrão, frete e prazo a equipe confirma ao emitir o orçamento.";
+  "Valor do site com personalização padrão. Personalização fora do padrão, frete e prazo a equipe confirma ao emitir o orçamento.";
 
 export const reais = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -61,7 +64,7 @@ export async function prepararOrcamentoHandler(
           erro: "informe_a_cor",
           produto: produto.name,
           opcoes: produto.subproducts
-            .filter((s) => s.status && s.stock > 0)
+            .filter((s) => s.status && (ehSobDemanda(produto.id) || s.stock > 0))
             .map((s) => ({ subproduto_id: s.id, cor: s.color, estoque: s.stock })),
           instrucao:
             "Esse id é do produto, não da cor. Use o subproduto_id da cor que o cliente pediu; se ele aceitou qualquer cor, use uma com estoque que cubra a quantidade; se ele não disse, pergunte. Depois chame preparar_orcamento de novo.",
@@ -101,7 +104,10 @@ export async function prepararOrcamentoHandler(
           mensagem: `O subproduto "${sub.color}" de "${p.name}" está inativo.`,
         };
       }
-      if (sub.stock < item.quantidade) {
+      if (!ehSobDemanda(p.id) && sub.stock < item.quantidade) {
+        const coresQueAtendem = p.subproducts
+          .filter((s) => s.status && s.stock >= item.quantidade)
+          .map((s) => ({ subproduto_id: s.id, cor: s.color }));
         // Sem a cor e as alternativas, o modelo chutava a cor no texto e inventava outra quantidade (25/10).
         return {
           erro: "estoque_insuficiente",
@@ -109,11 +115,10 @@ export async function prepararOrcamentoHandler(
           cor: sub.color,
           estoque_disponivel: sub.stock,
           quantidade_solicitada: item.quantidade,
-          cores_que_atendem: p.subproducts
-            .filter((s) => s.status && s.stock >= item.quantidade)
-            .map((s) => ({ subproduto_id: s.id, cor: s.color })),
-          instrucao:
-            "Diga ao cliente qual cor não tem estoque. Se ele aceitou qualquer cor, prepare de novo com uma de cores_que_atendem; senão, ofereça essas cores. Nunca mude a quantidade sem ele pedir.",
+          cores_que_atendem: coresQueAtendem,
+          instrucao: coresQueAtendem.length
+            ? "Diga ao cliente qual cor não tem estoque. Se ele aceitou qualquer cor, prepare de novo com uma de cores_que_atendem; senão, ofereça essas cores. Nunca mude a quantidade sem ele pedir."
+            : `Nenhuma cor tem estoque para essa quantidade. ${SEM_ESTOQUE_OFERECA_HUMANO} Nunca mude a quantidade sem ele pedir.`,
         };
       }
       if (item.quantidade < p.min_quantity) {
@@ -125,21 +130,18 @@ export async function prepararOrcamentoHandler(
         };
       }
 
-      const range = sub.prices.find(
-        (r) => item.quantidade >= r.min && item.quantidade <= r.max
-      );
-      // O preço de referência do produto só vale para cor SEM tabela (relatorio-campos-api.md).
-      // Com tabela e a quantidade fora de todas as faixas, o resumo mostraria um preço que a loja não pratica.
-      if (!range && sub.prices.length > 0) {
+      const cotacao = cotacaoValida(state, item.subproduto_id, item.quantidade) ?? (await cotarUma(client, state, item.subproduto_id, item.quantidade));
+      if (!cotacao || cotacao.centavos === 0) {
         return {
-          erro: "sem_faixa_de_preco",
+          erro: "preco_indisponivel",
           subproduto_id: item.subproduto_id,
           quantidade_solicitada: item.quantidade,
-          faixas: sub.prices.map((r) => ({ min: r.min, max: r.max })),
-          instrucao: "A quantidade não está em nenhuma faixa de preço desta cor. Ofereça uma quantidade dentro das faixas ou transfira.",
+          instrucao: "transferir",
+          motivo_sugerido: "outro",
+          mensagem: "O site não deu o preço desta cor nesta quantidade: quem fecha o valor é a equipe.",
         };
       }
-      const price = range?.price ?? p.price;
+      const price = cotacao.centavos / 100;
 
       const subtotal = arredondar(price * item.quantidade);
       totalEstimado = arredondar(totalEstimado + subtotal);
@@ -214,4 +216,10 @@ export async function prepararOrcamentoHandler(
 
 function chaveDosItens(itens: Array<{ subproduto_id: string; quantidade: number }>): string {
   return itens.map((i) => `${i.subproduto_id}:${i.quantidade}`).sort().join("|");
+}
+
+async function cotarUma(client: BrindeMeClient, state: ConversationState, subprodutoId: string, quantidade: number): Promise<Cotacao | undefined> {
+  const [r] = await cotarAoVivo(client, [{ subprodutoId, quantidade }]);
+  guardarCotacoes(state, [r]);
+  return cotou(r) ? r : undefined;
 }

@@ -1,8 +1,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { temErro, verificarAmbiente, type FatosAmbiente } from "../src/operacao/verificacaoAmbiente.js";
+import { exigirAmbiente } from "../src/operacao/exigirAmbiente.js";
 import { apagar, selecionarCliente, selecionarParaLimpeza } from "../src/operacao/retencao.js";
 import { formatarRelatorio, resumirLogs } from "../src/operacao/relatorio.js";
 
@@ -22,9 +23,46 @@ const ENV_PILOTO = {
   BRINDEME_BASE_URL: "https://api.loja.com.br",
   BRINDEME_TOKEN: "tok",
   WHATSAPP_LIBERADOS: "5583999990000",
+  CRM_URL: "https://crm.loja.com.br",
+  CRM_INTEGRATION_SECRET: "0123456789abcdef",
 };
 
 describe("verificar:env", () => {
+  it("sem BRINDEME_MODE: erro em produção, aviso em desenvolvimento", () => {
+    const { BRINDEME_MODE: _, ...semModo } = ENV_PILOTO;
+    expect(verificarAmbiente(semModo, FATOS_OK, { producao: true }).find((a) => a.item === "BRINDEME_MODE")?.gravidade).toBe("erro");
+    expect(verificarAmbiente(semModo, FATOS_OK, { producao: false }).find((a) => a.item === "BRINDEME_MODE")?.gravidade).toBe("aviso");
+  });
+
+  it("CRM desligado sem CRM=desligado: erro em produção; com CRM=desligado, só aviso", () => {
+    const semCrm = { ...ENV_PILOTO, CRM_URL: "", CRM_INTEGRATION_SECRET: "" };
+    expect(verificarAmbiente(semCrm, FATOS_OK, { producao: true }).find((a) => a.item === "CRM")?.gravidade).toBe("erro");
+    expect(verificarAmbiente({ ...semCrm, CRM_INTEGRATION_SECRET: "curto", CRM_URL: "https://crm" }, FATOS_OK, { producao: true }).find((a) => a.item === "CRM")?.gravidade).toBe("erro");
+    expect(verificarAmbiente({ ...semCrm, CRM: "desligado" }, FATOS_OK, { producao: true }).find((a) => a.item === "CRM")?.gravidade).toBe("aviso");
+    expect(verificarAmbiente(semCrm, FATOS_OK, { producao: false }).find((a) => a.item === "CRM")?.gravidade).toBe("aviso");
+  });
+
+  it("exigirAmbiente: produção é o padrão e sai com 1; AMBIENTE=dev deixa passar; a ponte só olha o CRM", () => {
+    const saida = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const erro = vi.spyOn(console, "error").mockImplementation(() => {});
+    const avisoConsole = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      exigirAmbiente("ponte", { CRM_URL: "" });
+      expect(saida).toHaveBeenCalledWith(1);
+      saida.mockClear();
+      exigirAmbiente("ponte", { CRM_URL: "", AMBIENTE: "dev" });
+      exigirAmbiente("ponte", { CRM: "desligado" });
+      exigirAmbiente("ponte", { CRM_URL: "https://crm.loja.com.br", CRM_INTEGRATION_SECRET: "0123456789abcdef" });
+      expect(saida).not.toHaveBeenCalled();
+      exigirAmbiente("agente", { CRM: "desligado" });
+      expect(saida).toHaveBeenCalledWith(1);
+    } finally {
+      saida.mockRestore();
+      erro.mockRestore();
+      avisoConsole.mockRestore();
+    }
+  });
+
   it("piloto bem configurado: sem erro e sem aviso", () => {
     const a = verificarAmbiente(ENV_PILOTO, FATOS_OK, { producao: true });
     expect(a.filter((x) => x.gravidade !== "ok")).toEqual([]);

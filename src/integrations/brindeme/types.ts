@@ -10,7 +10,14 @@ export interface Subproduct {
   status: boolean;
   color: string;
   stock: number;
+  /** Preço de VENDA (o do site) depois de ClienteComPrecoDeVenda; no mock, a tabela do fixture vale como venda. */
   prices: PriceRange[];
+  /** Limites das faixas de custo, sem o valor: o mapa de onde o preço de venda pode mudar. */
+  limites?: Array<{ min: number; max: number }>;
+  /** Grupo de cores com as mesmas faixas de custo, logo com o mesmo preço de venda (hash, sem o valor). */
+  grupo_preco?: string;
+  /** A consulta do preço de venda do grupo falhou: prices vem vazio. */
+  preco_indisponivel?: boolean;
 }
 
 export interface ProductImage {
@@ -41,7 +48,6 @@ export interface Product {
   status: boolean;
   featured: boolean;
   stock: number;
-  price: number;
   min_quantity: number;
   categories: Category[];
   images: ProductImage[];

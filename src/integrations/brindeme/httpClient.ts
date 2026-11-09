@@ -24,6 +24,7 @@ import {
 } from "./mappers.js";
 import { config } from "../../config.js";
 import { CircuitBreaker, CircuitOpenError } from "./circuitBreaker.js";
+import { PrecoVendaHttp } from "./precoVenda.js";
 import { FileApiLogger, MemoryApiLogger, sanitizeUrl, type ApiLogger } from "./apiLogger.js";
 
 export { CircuitOpenError } from "./circuitBreaker.js";
@@ -36,6 +37,7 @@ export interface HttpClientOptions {
   timeoutMs?: number;
   maxRetries?: number;
   apiLogger?: ApiLogger;
+  precoVenda?: PrecoVendaHttp;
   circuitBreaker?: CircuitBreaker;
   /** Espaça as chamadas deste cliente; vazio = sem limite. A API corta em 60/min por chave. */
   reqPorMinuto?: number;
@@ -80,6 +82,7 @@ export class HttpBrindeMeClient implements BrindeMeClient {
   private readonly relogio: Relogio;
   private proximaVez = 0;
   readonly circuito: CircuitBreaker;
+  private readonly vitrine: PrecoVendaHttp;
 
   constructor(options?: Partial<HttpClientOptions>) {
     const base = options?.baseUrl ?? config.brindeMe.baseUrl;
@@ -97,6 +100,7 @@ export class HttpBrindeMeClient implements BrindeMeClient {
     this.apiLogger =
       options?.apiLogger ?? (config.brindeMe.logarChamadas ? new FileApiLogger() : new MemoryApiLogger());
     this.circuito = options?.circuitBreaker ?? new CircuitBreaker();
+    this.vitrine = options?.precoVenda ?? new PrecoVendaHttp({ apiLogger: this.apiLogger });
     const rpm = options?.reqPorMinuto ?? 0;
     this.intervaloMs = rpm > 0 ? 60_000 / rpm : 0;
     this.maxEsperaRetryMs = options?.maxEsperaRetryMs ?? config.brindeMe.maxEsperaRetryMs;
@@ -256,6 +260,10 @@ export class HttpBrindeMeClient implements BrindeMeClient {
       current_page: paginacao.current_page,
       last_page: paginacao.last_page,
     };
+  }
+
+  precoVenda(subprodutoId: string, quantidades: number[]): Promise<Map<number, number>> {
+    return this.vitrine.consultar(subprodutoId, quantidades);
   }
 
   async getProduct(id: string): Promise<Product> {

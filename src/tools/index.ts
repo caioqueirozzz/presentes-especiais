@@ -51,7 +51,7 @@ export const tools: ToolDefinition[] = [
   {
     name: "buscar_produtos",
     description:
-      "Recomenda até 3 produtos da loja a partir do que o cliente procura (palavras-chave, ocasião), da quantidade e do valor (por unidade ou total). Só devolve produtos que respeitam quantidade mínima, estoque e valor, com preço da faixa de quantidade e total estimado, conferidos na plataforma. Use sempre que o cliente pedir recomendação ou sugestão. Nunca cite produto, preço ou estoque que não tenha vindo desta ferramenta ou de detalhar_produto.",
+      "Recomenda até 3 produtos da loja a partir do que o cliente procura (palavras-chave, ocasião), da quantidade e do valor (por unidade ou total). Só devolve produtos que respeitam quantidade mínima, estoque e valor, com o preço exato do site na quantidade. O sistema envia ao cliente um cartão com foto e esse preço por produto; o retorno traz cartoes_enviados e total_se_o_cliente_perguntar. Não redigite o cartão. Use sempre que o cliente pedir recomendação ou sugestão. Nunca cite produto, preço ou estoque que não tenha vindo desta ferramenta ou de detalhar_produto.",
     inputSchema: schemaDaFerramenta(buscarProdutosSchema),
     schema: buscarProdutosSchema,
     handler: buscarProdutosHandler as ToolDefinition["handler"],
@@ -59,7 +59,7 @@ export const tools: ToolDefinition[] = [
   {
     name: "detalhar_produto",
     description:
-      "Retorna detalhes completos de um produto: subprodutos ativos, cores, estoque, tabela de preços por faixa e personalizações. Use quando o cliente pedir mais informações sobre um produto específico, com o id que veio de buscar_produtos. Com quantidade, diga quais cores cobrem o pedido pelo campo cores_que_atendem_quantidade, sem comparar estoque de cabeça.",
+      "Retorna detalhes de um produto: cores ativas, estoque e personalizações. Com quantidade, o sistema envia ao cliente um cartão com foto e o preço exato do site de cada cor; o retorno traz cartoes_enviados, sem o preço. Não redigite o cartão. Use quando o cliente pedir mais informações sobre um produto específico, com o id que veio de buscar_produtos. Com quantidade, diga quais cores cobrem o pedido pelo campo cores_que_atendem_quantidade, sem comparar estoque de cabeça.",
     inputSchema: schemaDaFerramenta(detalharProdutoSchema),
     schema: detalharProdutoSchema,
     handler: detalharProdutoHandler as ToolDefinition["handler"],
@@ -67,7 +67,7 @@ export const tools: ToolDefinition[] = [
   {
     name: "preparar_orcamento",
     description:
-      "Valida os itens (cor, estoque, quantidade mínima, faixa de preço) e calcula a estimativa de tabela para a equipe emitir o orçamento. Cada item é um subproduto (produto + cor): o subproduto_id da cor pedida vem de subprodutos em buscar_produtos, de subprodutos_ativos em detalhar_produto ou de produtos_detalhados no estado da conversa; nunca use o id do produto e nunca invente. O cliente vê o resumo e confirma; depois, transferir_humano com motivo orcamento_para_emitir leva a estimativa à equipe.",
+      "Valida os itens (cor, estoque, quantidade mínima) e calcula a estimativa com o preço exato do site para a equipe emitir o orçamento. Cada item é um subproduto (produto + cor): o subproduto_id da cor pedida vem de subprodutos em buscar_produtos, de subprodutos_ativos em detalhar_produto ou de produtos_detalhados no estado da conversa; nunca use o id do produto e nunca invente. O cliente vê o resumo e confirma; depois, transferir_humano com motivo orcamento_para_emitir leva a estimativa à equipe.",
     inputSchema: schemaDaFerramenta(prepararOrcamentoSchema),
     schema: prepararOrcamentoSchema,
     handler: prepararOrcamentoHandler as ToolDefinition["handler"],

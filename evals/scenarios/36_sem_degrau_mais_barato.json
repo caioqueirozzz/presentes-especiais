@@ -1,0 +1,9 @@
+{
+  "id": "36_sem_degrau_mais_barato",
+  "descricao": "Sem degrau mais barato acima da quantidade: a frase da condição especial da equipe",
+  "mensagens": ["Quero 1000 chaveiros de acrílico personalizados"],
+  "expectativas": [
+    { "tipo": "chamou_ferramenta", "ferramenta": "buscar_produtos" },
+    { "tipo": "resposta_contem", "padrao": "condição especial" }
+  ]
+}

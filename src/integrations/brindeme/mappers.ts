@@ -153,7 +153,6 @@ export function mapProduct(raw: Json): Product {
     status: bool(raw.status),
     featured: bool(raw.featured),
     stock: num(raw.stock),
-    price: money(raw.price),
     min_quantity: num(raw.min_quantity, 1),
     categories: mapCategories(raw.categories),
     images:

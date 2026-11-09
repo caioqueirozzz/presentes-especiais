@@ -1,4 +1,5 @@
 import { readFileSync } from "fs";
+import type { Cartao } from "../tools/cartao.js";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import type { LLMProvider, LLMMessage } from "../llm/types.js";
@@ -137,6 +138,8 @@ export interface TurnResult {
   transferencia?: ResumoTransferencia;
   /** Perguntas que a base de conhecimento não cobriu neste turno. */
   lacunas: string[];
+  /** Cartões de produto do turno (foto + legenda): a ponte envia antes do texto. */
+  cartoes?: Cartao[];
 }
 
 export interface OpcoesTurno {
@@ -148,6 +151,17 @@ export interface OpcoesTurno {
   aoTransferir?: (resumo: ResumoTransferencia, lacunas: string[]) => void;
   /** Ferramentas cujo handler não deve ser chamado: respondem com ferramenta_desligada → transferência. */
   ferramentasDesligadas?: Set<string>;
+}
+
+/** O e-mail do orçamento tem de ter vindo do cliente: já guardado no estado ou escrito numa mensagem dele. */
+function emailDoCliente(state: ConversationState, email: string): boolean {
+  const e = email.trim().toLowerCase();
+  // E-mail inteiro: "ana@x.com" não pode casar dentro de "banana@x.com".
+  const escritos = (texto: string) => texto.toLowerCase().match(/[^\s<>"'(),;:[\]]+@[^\s<>"'(),;:[\]]+/g)?.map((x) => x.replace(/[.?!]+$/, "")) ?? [];
+  return (
+    state.cliente.email?.toLowerCase() === e ||
+    state.historico.some((m) => m.role === "user" && escritos(m.content).includes(e))
+  );
 }
 
 export async function runTurn(
@@ -206,6 +220,7 @@ export async function runTurn(
   let transferred = false;
   let transferencia: ResumoTransferencia | undefined;
   const lacunas: string[] = [];
+  let cartoes: Cartao[] = [];
   /** Itens da base de conhecimento usados neste turno (auditoria da Fase 3). */
   const kbItens = new Set<string>();
   /** Motivo da última ferramenta que mandou transferir; vale mesmo se o modelo não obedecer. */
@@ -218,6 +233,7 @@ export async function runTurn(
     toolsCalled,
     transferred,
     lacunas,
+    ...(cartoes.length ? { cartoes } : {}),
     ...(transferencia ? { transferencia } : {}),
   });
 
@@ -294,6 +310,14 @@ export async function runTurn(
               "Nenhuma ferramenta falhou: falha_sistema não se aplica. Siga o atendimento pelas ferramentas (estoque e orçamento se conferem em preparar_orcamento). Se o caso precisar mesmo de atendente, use o motivo que o descreve.",
           };
           error = "motivo_invalido";
+        } else if (toolName === "preparar_orcamento" && !emailDoCliente(state, (entrada.data as { email: string }).email)) {
+          // Sem o e-mail que o cliente escreveu, o modelo inventava nome e e-mail, e eles iam para a ficha (eval 39).
+          output = {
+            erro: "dados_nao_informados",
+            instrucao_ao_agente:
+              "O cliente ainda não informou o e-mail do orçamento. Peça a ele, numa frase, o que falta entre PF ou PJ, nome e e-mail; nunca invente. Depois chame preparar_orcamento de novo.",
+          };
+          error = "dados_nao_informados";
         } else {
           try {
             // Entrada já conferida: campo a mais (ex.: telefone inventado) não chega ao handler.
@@ -329,7 +353,7 @@ export async function runTurn(
               ferramenta: toolName,
             });
           }
-        } else if (error !== "parametros_invalidos" && error !== "unknown_tool" && error !== "motivo_invalido") {
+        } else if (error !== "parametros_invalidos" && error !== "unknown_tool" && error !== "motivo_invalido" && error !== "dados_nao_informados") {
           // Erro do modelo não chega à loja: não prova que a API voltou.
           state.falhasConsecutivas = 0;
         }
@@ -350,6 +374,41 @@ export async function runTurn(
           duration_ms: Date.now() - start,
           error,
         });
+
+        const daFerramenta = (output as { cartoes?: Cartao[] } | null)?.cartoes;
+        let paraOModelo = output;
+        if (Array.isArray(daFerramenta)) {
+          // Busca nova troca a vitrine do turno; detalhe acrescenta ou substitui o cartão do mesmo produto.
+          cartoes =
+            toolName === "buscar_produtos"
+              ? daFerramenta
+              : [...cartoes.filter((c) => !daFerramenta.some((n) => n.produto_id === c.produto_id)), ...daFerramenta];
+          // Com a legenda à vista, o modelo a copiava no texto (eval 35): ele só fica sabendo que os cartões saíram.
+          const {
+            cartoes: _enviados,
+            produtos,
+            subprodutos_ativos,
+            preco_para_quantidade_a_partir_de: _aPartirDe,
+            ...resto
+          } = output as Record<string, unknown>;
+          // O preço unitário também está no cartão: à vista, o modelo o redigitava. O total da busca fica, para quando o cliente perguntar.
+          paraOModelo = {
+            ...resto,
+            ...(Array.isArray(produtos)
+              ? {
+                  produtos: produtos.map(({ preco_unitario_na_quantidade: _p, total_estimado, cor_do_total, ...p }) => ({
+                    ...p,
+                    total_se_o_cliente_perguntar: total_estimado,
+                    ...(cor_do_total ? { total_vale_so_para_a_cor: cor_do_total } : {}),
+                  })),
+                }
+              : {}),
+            ...(Array.isArray(subprodutos_ativos)
+              ? { subprodutos_ativos: subprodutos_ativos.map(({ preco_para_quantidade: _p, ...s }) => s) }
+              : {}),
+            cartoes_enviados: daFerramenta.length,
+          };
+        }
 
         if (toolName === "consultar_conhecimento") {
           const o = output as { resultado?: string; itens?: Array<{ id: string }> };
@@ -380,7 +439,7 @@ export async function runTurn(
         (toolResults as Array<{ type: string; tool_use_id: string; content: string }>).push({
           type: "tool_result",
           tool_use_id: toolId,
-          content: JSON.stringify(output),
+          content: JSON.stringify(paraOModelo),
         });
       }
 
@@ -425,7 +484,9 @@ export async function runTurn(
         ...(kbItens.size > 0 ? { kb_itens: [...kbItens] } : {}),
       });
 
-      if (text) addMessage(state, "assistant", text);
+      // O histórico guarda o que o cliente viu: o modelo do turno seguinte e o CRM leem os cartões daqui.
+      const visto = [...cartoes.map((c) => c.legenda), text].filter(Boolean).join("\n\n");
+      if (visto) addMessage(state, "assistant", visto);
       continueLoop = false;
 
       return resultado(text);

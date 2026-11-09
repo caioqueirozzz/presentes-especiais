@@ -32,8 +32,8 @@ export const config = {
   storeName: process.env.STORE_NAME ?? "Presentes Especiais",
 
   brindeMe: {
-    /** "mock" usa os JSONs de mocks/; "http" bate na API real. */
-    mode: (process.env.BRINDEME_MODE ?? "mock") as "mock" | "http",
+    /** "mock" usa os JSONs de mocks/; "http" bate na API real. Sem padrão: em produção o agente não sobe sem dizer qual. */
+    mode: (process.env.BRINDEME_MODE ?? "") as "mock" | "http",
     baseUrl: (process.env.BRINDEME_BASE_URL ?? "").replace(/\/+$/, ""),
     token: process.env.BRINDEME_TOKEN ?? "",
     /**

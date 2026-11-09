@@ -1,12 +1,14 @@
 import { resolve } from "path";
-import type { Evento, Modo } from "../contrato/esquemas.js";
+import { z } from "zod";
+import type { Evento, ItemResposta, Modo } from "../contrato/esquemas.js";
+import { itemRespostaSchema } from "../contrato/esquemas.js";
 import type { LogPonte } from "./log.js";
 import { gravarArquivoAtomico, lerArquivo, separarCorrompido } from "../util/arquivo.js";
 
 /** Partes da resposta às mensagens `ids` que já chegaram ao cliente. */
 export interface EntregaParcial {
   ids: string[];
-  partes: string[];
+  partes: ItemResposta[];
 }
 
 /** O que a ponte precisa lembrar depois de reiniciar para não repetir resposta nem esquecer o atendente. */
@@ -82,11 +84,13 @@ export class ArquivoEstadoPonte implements ArmazemPonte {
 
 const textos = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
 
+const partesValidas = (v: unknown): v is ItemResposta[] => z.array(itemRespostaSchema).safeParse(v).success;
+
 function entregasValidas(bruto: unknown): Record<string, EntregaParcial> {
   if (typeof bruto !== "object" || bruto === null) return {};
   const validas: Record<string, EntregaParcial> = {};
   for (const [telefone, e] of Object.entries(bruto as Record<string, Partial<EntregaParcial>>)) {
-    if (textos(e?.ids) && textos(e?.partes)) validas[telefone] = { ids: e.ids, partes: e.partes };
+    if (textos(e?.ids) && partesValidas(e?.partes)) validas[telefone] = { ids: e.ids, partes: e.partes };
   }
   return validas;
 }

@@ -1,0 +1,10 @@
+{
+  "id": "34_sem_estoque_oferece_humano",
+  "descricao": "Nenhum resultado com estoque para a quantidade: diz que não tem no estoque e oferece uma pessoa da equipe",
+  "mensagens": ["Quero 1500 chaveiros de acrílico personalizados"],
+  "expectativas": [
+    { "tipo": "chamou_ferramenta", "ferramenta": "buscar_produtos" },
+    { "tipo": "resposta_contem", "padrao": "estoque" },
+    { "tipo": "resposta_contem", "padrao": "equipe|atendente|pessoa|consultor" }
+  ]
+}

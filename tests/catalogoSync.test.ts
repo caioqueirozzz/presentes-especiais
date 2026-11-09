@@ -4,6 +4,7 @@ import {
   FileProductIndexStore,
   sincronizarCatalogo,
   construirRegistro,
+  VERSAO_INDICE,
 } from "../src/catalogo/indice.js";
 import { ApiError } from "../src/integrations/brindeme/errors.js";
 import { ClienteCatalogoFalso, produto, sub } from "./helpers/produtos.js";
@@ -280,5 +281,41 @@ describe("FileProductIndexStore", () => {
     writeFileSync(file, JSON.stringify({ versao: 99, produtos: [{ id: "x" }] }), "utf-8");
     expect(new FileProductIndexStore(file).carregar().produtos).toEqual([]);
     expect(readFileSync(file, "utf-8")).toContain("99"); // não sobrescreveu
+  });
+});
+
+describe("índice v2 (preço de venda)", () => {
+  it("o registro guarda limites, grupo e a data das faixas de venda", () => {
+    const p = produto({ id: "p", nome: "P", subprodutos: [{ ...sub("s", "Azul", 10, [[10, 99, 5]]), limites: [{ min: 10, max: 99 }], grupo_preco: "abc123abc123" }] });
+    const r = construirRegistro(p, new Date("2026-11-06T03:00:00Z"));
+    expect(r.subprodutos[0]).toMatchObject({
+      faixas: [{ min: 10, max: 99, preco: 5 }],
+      limites: [{ min: 10, max: 99 }],
+      grupo_preco: "abc123abc123",
+      faixas_venda_em: "2026-11-06T03:00:00.000Z",
+    });
+  });
+
+  it("produto com preço de venda indisponível conta como falha e mantém o registro anterior", async () => {
+    const p = produto({ id: "p", nome: "P" });
+    const store = new MemoryProductIndexStore();
+    const cliente = new ClienteCatalogoFalso([p]);
+    await sincronizarCatalogo(cliente, store);
+    const anterior = store.carregar().produtos[0];
+    cliente.alterar("p", (x) => {
+      x.subproducts[0].preco_indisponivel = true;
+      x.subproducts[0].prices = [];
+    });
+    const r = await sincronizarCatalogo(cliente, store, { forcar: true });
+    expect(r.falhas).toEqual([{ id: "p", erro: "preco_de_venda_indisponivel" }]);
+    expect(store.carregar().produtos[0].subprodutos[0].faixas).toEqual(anterior.subprodutos[0].faixas);
+  });
+
+  it("um índice v1 no disco carrega vazio (Foco da revisão 3: é preciso migrar)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "indice-v1-"));
+    const arquivo = join(dir, "produtos-index.json");
+    writeFileSync(arquivo, JSON.stringify({ versao: 1, sincronizado_em: "x", completo: true, produtos: [{ id: "a" }] }));
+    expect(VERSAO_INDICE).toBe(2);
+    expect(new FileProductIndexStore(arquivo).carregar().produtos).toEqual([]);
   });
 });

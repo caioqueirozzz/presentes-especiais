@@ -152,7 +152,7 @@ describe("contagem centralizada de falhas de API", () => {
       endTurn("o mínimo é maior"),
     ]);
 
-    await runTurn("quero 1 caneca", state, llm, client, logger);
+    await runTurn("quero 1 caneca, joao@teste.com", state, llm, client, logger);
 
     const resultados = ultimosToolResults(llm.seen);
     expect(resultados[0].erro).toBe("abaixo_do_minimo");

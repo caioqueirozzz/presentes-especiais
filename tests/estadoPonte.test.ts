@@ -40,6 +40,14 @@ describe("ArquivoEstadoPonte", () => {
     expect(new ArquivoEstadoPonte(arquivo).carregar().entregasParciais).toEqual({ [TEL]: valida });
   });
 
+  it("entrega parcial com foto salva e relê", () => {
+    const arquivo = join(dir, "ponte.json");
+    const partes = [{ imagem_url: "https://cdn.brinde.me/x.webp", legenda: "L" }, "texto"];
+    const estado = { ...estadoVazio(), entregasParciais: { [TEL]: { ids: ["m1"], partes } } };
+    new ArquivoEstadoPonte(arquivo).salvar(estado);
+    expect(new ArquivoEstadoPonte(arquivo).carregar().entregasParciais).toEqual({ [TEL]: { ids: ["m1"], partes } });
+  });
+
   it("arquivo ilegível vira .corrompido-<data> e a ponte começa do zero, com alerta", () => {
     const arquivo = join(dir, "ponte.json");
     writeFileSync(arquivo, "{ quebrado", "utf-8");

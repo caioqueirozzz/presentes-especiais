@@ -47,6 +47,36 @@ describe("Observador da ponte (CRM)", () => {
     expect(atualizadas).toContain(TEL);
   });
 
+  it("Foco da revisão 1: o eco da foto da IA é AGENTE, leva a URL ao CRM e não pausa a IA", async () => {
+    const { canal, agente, ponte, vistas } = montar();
+    const foto = { imagem_url: "https://cdn.brinde.me/x.webp", legenda: "*Caneca*" };
+    agente.padrao = { tipo: "ok", resposta: { respostas: [foto, "Gostou?"], modo: "ia" } };
+    await ponte.receber(canal.mensagem({ chatId: CLIENTE, texto: "quero canecas" }));
+    await vi.runAllTimersAsync();
+    expect(canal.imagens.map((i) => i.url)).toEqual([foto.imagem_url]);
+    expect(vistas.map((v) => [v.autor, v.texto])).toEqual([
+      ["CLIENTE", "quero canecas"],
+      ["AGENTE", "*Caneca*\nhttps://cdn.brinde.me/x.webp"],
+      ["AGENTE", "Gostou?"],
+    ]);
+    expect(agente.eventos).toEqual([]);
+  });
+
+  it("foto que falha sem eco: o eco do recuo em texto é AGENTE, sem URL, e não pausa a IA", async () => {
+    const { canal, agente, ponte, vistas } = montar();
+    const foto = { imagem_url: "https://cdn.brinde.me/x.webp", legenda: "*Caneca*" };
+    canal.falharImagem.set(foto.imagem_url, 1);
+    agente.padrao = { tipo: "ok", resposta: { respostas: [foto], modo: "ia" } };
+    await ponte.receber(canal.mensagem({ chatId: CLIENTE, texto: "quero canecas" }));
+    await vi.runAllTimersAsync();
+    expect(canal.enviadas.map((e) => e.texto)).toEqual(["*Caneca*"]);
+    expect(vistas.map((v) => [v.autor, v.texto])).toEqual([
+      ["CLIENTE", "quero canecas"],
+      ["AGENTE", "*Caneca*"],
+    ]);
+    expect(agente.eventos).toEqual([]);
+  });
+
   it("observar não muda a regra do atendente: mensagem humana ainda pausa a IA", async () => {
     const { canal, agente, ponte } = montar();
     await ponte.receber(canal.mensagem({ chatId: CLIENTE, texto: "oi", deMim: true }));

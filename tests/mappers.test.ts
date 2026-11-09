@@ -59,7 +59,6 @@ describe("mappers — produto", () => {
   it("converte code int, preço em centavos e imagem aninhada", () => {
     const p = mapProduct(PRODUTO_LISTAGEM);
     expect(p.code).toBe("15437");
-    expect(p.price).toBeCloseTo(3.77);
     expect(p.images[0].url).toBe("https://cdn.brinde.me/p/orig.jpg");
   });
 

@@ -31,7 +31,7 @@ import { config } from "../config.js";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
-export const VERSAO_INDICE = 1;
+export const VERSAO_INDICE = 2;
 /** Quantas sincronizações completas seguidas um produto pode faltar na listagem antes de sair do índice. */
 const AUSENCIAS_PARA_REMOVER = 2;
 const LIMITE_DESCRICAO = 600;
@@ -39,7 +39,7 @@ const LIMITE_DESCRICAO = 600;
 export interface FaixaPreco {
   min: number;
   max: number;
-  /** Reais. */
+  /** Reais: preço de venda (o do site). */
   preco: number;
 }
 
@@ -49,6 +49,12 @@ export interface SubprodutoIndexado {
   cor: string;
   estoque: number;
   faixas: FaixaPreco[];
+  /** Limites das faixas de custo, sem o valor: o sync:precos reconsulta o site nestes pontos. */
+  limites?: Array<{ min: number; max: number }>;
+  /** Cores com o mesmo grupo têm o mesmo preço de venda (ver faixasDeVenda.chaveDoGrupo). */
+  grupo_preco?: string;
+  /** Quando as faixas de venda foram lidas do site (ISO). */
+  faixas_venda_em?: string;
 }
 
 /**
@@ -197,6 +203,9 @@ export function construirRegistro(
         cor: s.color,
         estoque: Math.max(0, s.stock),
         faixas: s.prices.map((f) => ({ min: f.min, max: f.max, preco: arredondar(f.price) })),
+        limites: s.limites ?? s.prices.map(({ min, max }) => ({ min, max })),
+        grupo_preco: s.grupo_preco ?? "",
+        faixas_venda_em: agora.toISOString(),
       })),
     etiquetas_embutidas: (p.tags_ocasiao ?? etiquetasEmbutidas).slice(),
     atualizado_em: p.updated_at ?? "",
@@ -315,6 +324,8 @@ export async function sincronizarCatalogo(
       const p = precisam[proximo++];
       try {
         const detalhe = await client.getProduct(p.id);
+        // Sem o preço de venda, o registro anterior vale mais que um produto sem preço.
+        if (detalhe.subproducts.some((s) => s.status && s.preco_indisponivel)) throw new Error("preco_de_venda_indisponivel");
         // O detalhe é a fonte de verdade; produto desativado entre a listagem e o detalhe sai.
         if (detalhe.status) lidos.set(p.id, construirRegistro(detalhe, agora));
         else desativados.add(p.id);

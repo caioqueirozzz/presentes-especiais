@@ -313,7 +313,7 @@ describe("recomendar — sem resultado: explica e propõe o ajuste mais próximo
     if (r.tipo !== "nenhum") return;
     expect(r.eliminadosPor.abaixo_do_minimo).toBe(1);
     expect(r.ajustes).toEqual([
-      { tipo: "aumentar_quantidade", produto_id: "ecobag", nome: "Ecobag de Algodão", quantidade: 100, preco_unitario: 5, total_estimado: 500 },
+      { tipo: "aumentar_quantidade", produto_id: "ecobag", nome: "Ecobag de Algodão", quantidade: 100, preco_unitario: 5, total_estimado: 500, cor: "Natural" },
     ]);
   });
 
@@ -322,7 +322,7 @@ describe("recomendar — sem resultado: explica e propõe o ajuste mais próximo
     const r = await buscar({ consulta: "squeeze", quantidade: 50, precoMaxUnitario: 5 });
     if (r.tipo !== "nenhum") throw new Error("esperava nenhum");
     expect(r.ajustes).toEqual([
-      { tipo: "aumentar_orcamento", produto_id: "squeeze", nome: "Squeeze de Alumínio", quantidade: 50, preco_unitario_minimo: 12, total_estimado: 600 },
+      { tipo: "aumentar_orcamento", produto_id: "squeeze", nome: "Squeeze de Alumínio", quantidade: 50, preco_unitario_minimo: 12, total_estimado: 600, cor: "Azul" },
     ]);
   });
 
@@ -331,7 +331,7 @@ describe("recomendar — sem resultado: explica e propõe o ajuste mais próximo
     const r = await buscar({ consulta: "squeeze", quantidade: 400 });
     if (r.tipo !== "nenhum") throw new Error("esperava nenhum");
     expect(r.ajustes).toEqual([
-      { tipo: "reduzir_quantidade", produto_id: "squeeze", nome: "Squeeze de Alumínio", quantidade: 150, preco_unitario: 12, total_estimado: 1800 },
+      { tipo: "reduzir_quantidade", produto_id: "squeeze", nome: "Squeeze de Alumínio", quantidade: 150, preco_unitario: 12, total_estimado: 1800, cor: "Azul" },
     ]);
   });
 

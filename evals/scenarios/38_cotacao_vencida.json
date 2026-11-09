@@ -1,0 +1,14 @@
+{
+  "id": "38_cotacao_vencida",
+  "descricao": "Orçamento depois de 2 h do detalhe: cota de novo e mostra a estimativa, sem transferir",
+  "envelhecer_cotacoes_antes_da_ultima": true,
+  "mensagens": [
+    "me fala da caneca de porcelana, quero 50 unidades",
+    "quero as 50 na cor branca. PF, João Silva, joao@teste.com"
+  ],
+  "expectativas": [
+    { "tipo": "chamou_ferramenta", "ferramenta": "preparar_orcamento" },
+    { "tipo": "resposta_contem", "padrao": "R\\$\\s*\\d" },
+    { "tipo": "max_transferencias", "max": 0 }
+  ]
+}

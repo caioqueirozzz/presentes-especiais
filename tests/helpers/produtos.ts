@@ -8,6 +8,8 @@ import type {
   Subproduct,
 } from "../../src/integrations/brindeme/types.js";
 import { ApiError } from "../../src/integrations/brindeme/errors.js";
+import { ErroPrecoVenda } from "../../src/integrations/brindeme/precoVenda.js";
+import { centavosNaTabela } from "../../src/catalogo/faixasDeVenda.js";
 
 /** [min, max, preço em reais] */
 export type Faixa = [number, number, number];
@@ -55,7 +57,6 @@ export function produto(o: OpcoesProduto): Product {
     status: o.ativo ?? true,
     featured: o.destaque ?? false,
     stock: subprodutos.reduce((acc, s) => acc + s.stock, 0),
-    price: subprodutos[0]?.prices[0]?.price ?? 0,
     min_quantity: o.min ?? 1,
     categories: o.categoria ? [{ id: `cat-${o.categoria}`, name: o.categoria }] : [],
     images: [{ url: `https://cdn.teste/${o.id}.jpg` }],
@@ -84,6 +85,21 @@ export class ClienteCatalogoFalso implements BrindeMeClient {
   falhaNaPagina: number | null = null;
   /** Latência artificial do detalhe, para medir concorrência. */
   latenciaMs = 0;
+  /** subproduto_id → centavos que a "vitrine" devolve em qualquer quantidade (o site diverge da tabela). */
+  precoVendaFixo = new Map<string, number>();
+  /** subproduto_id → erro a lançar na consulta de preço de venda. */
+  falhaNoPreco = new Map<string, unknown>();
+  consultasDePreco: Array<{ subprodutoId: string; quantidades: number[] }> = [];
+
+  async precoVenda(subprodutoId: string, quantidades: number[]): Promise<Map<number, number>> {
+    this.consultasDePreco.push({ subprodutoId, quantidades });
+    const erro = this.falhaNoPreco.get(subprodutoId);
+    if (erro) throw erro;
+    const sub = this.produtos.flatMap((p) => p.subproducts).find((s) => s.id === subprodutoId);
+    if (!sub) throw new ErroPrecoVenda("formato", "subproduto inexistente", { status: 404 });
+    const fixo = this.precoVendaFixo.get(subprodutoId);
+    return new Map(quantidades.map((q) => [q, fixo ?? centavosNaTabela(sub.prices, q)]));
+  }
 
   constructor(public produtos: Product[]) {}
 

@@ -30,8 +30,14 @@ export const pedidoMensagensSchema = z.object({
 
 export const modoSchema = z.enum(["ia", "humano"]);
 
+/** Texto ou foto com legenda (cartão de produto). */
+export const itemRespostaSchema = z.union([
+  z.string(),
+  z.object({ imagem_url: z.string().url(), legenda: z.string().max(LIMITE_TEXTO) }),
+]);
+
 export const respostaMensagensSchema = z.object({
-  respostas: z.array(z.string()),
+  respostas: z.array(itemRespostaSchema),
   avisoAtendente: z.string().optional(),
   modo: modoSchema,
 });
@@ -56,6 +62,7 @@ export const respostaEventoSchema = z.object({ modo: modoSchema });
 export type Arquivo = z.infer<typeof arquivoSchema>;
 export type MensagemLote = z.infer<typeof mensagemLoteSchema>;
 export type PedidoMensagens = z.infer<typeof pedidoMensagensSchema>;
+export type ItemResposta = z.infer<typeof itemRespostaSchema>;
 export type Modo = z.infer<typeof modoSchema>;
 export type RespostaMensagens = z.infer<typeof respostaMensagensSchema>;
 export type Evento = z.infer<typeof eventoSchema>;

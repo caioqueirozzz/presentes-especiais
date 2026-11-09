@@ -1,0 +1,10 @@
+{
+  "id": "35_proximo_degrau",
+  "descricao": "Cartão traz o próximo degrau mais barato; o texto do modelo não redigita preço",
+  "mensagens": ["Quero 50 canecas personalizadas"],
+  "expectativas": [
+    { "tipo": "chamou_ferramenta", "ferramenta": "buscar_produtos" },
+    { "tipo": "resposta_contem", "padrao": "A partir de 100 un\\." },
+    { "tipo": "texto_nao_contem", "padrao": "R\\$\\s*\\d" }
+  ]
+}

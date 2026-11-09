@@ -16,6 +16,7 @@ import { RepositorioConversas } from "../src/conversas/repositorio.js";
 import { calcularTurnoId } from "../src/contrato/turno.js";
 import { LIMITE_TEXTO } from "../src/contrato/esquemas.js";
 import { config } from "../src/config.js";
+import { setSobDemanda } from "../src/catalogo/sobDemanda.js";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -27,6 +28,7 @@ interface Expectativa {
     | "transferiu_com_motivo"
     | "resposta_contem"
     | "resposta_nao_contem"
+    | "texto_nao_contem"
     | "campo_nao_vazou"
     | "max_transferencias";
   ferramenta?: string;
@@ -45,6 +47,12 @@ interface Scenario {
   telefone?: string;
   mensagens: string[];
   injetar_falha?: { tipo: FaultType; vezes: number };
+  /** Ids de produto tratados como sob demanda neste cenário (a lista real tem ids que o mock não tem). */
+  sob_demanda?: string[];
+  /** A rota de preço da vitrine fora do ar. */
+  falhar_preco_venda?: boolean;
+  /** Só no modo direto: as cotações guardadas envelhecem 2 h antes da última mensagem. */
+  envelhecer_cotacoes_antes_da_ultima?: boolean;
   expectativas: Expectativa[];
 }
 
@@ -75,7 +83,7 @@ async function turnoPelaApi(
   telefone: string,
   texto: string,
   id: string
-): Promise<TurnResult> {
+): Promise<TurnResult & { textoDoModelo?: string | null }> {
   capturado.r = undefined;
   const pedido = {
     turnoId: calcularTurnoId([id]),
@@ -85,7 +93,11 @@ async function turnoPelaApi(
   // Como a ponte: falha (503) repete o mesmo lote uma vez; a 2ª falha o agente transfere.
   const resposta = await agente.processarLote(pedido).catch(() => agente.processarLote(pedido));
   const bruto = capturado.r ?? { response: null, toolsCalled: [], transferred: false, lacunas: [] };
-  return { ...bruto, response: resposta.respostas.join("\n\n") || null };
+  return {
+    ...bruto,
+    textoDoModelo: bruto.response,
+    response: resposta.respostas.map((i) => (typeof i === "string" ? i : i.legenda)).join("\n\n") || null,
+  };
 }
 
 async function runScenario(scenario: Scenario): Promise<{ passed: number; failed: number; details: string[] }> {
@@ -112,13 +124,20 @@ async function runScenario(scenario: Scenario): Promise<{ passed: number; failed
     client.injectFault({ type: scenario.injetar_falha.tipo, remaining: scenario.injetar_falha.vezes });
   }
 
+  setSobDemanda(scenario.sob_demanda ?? []);
+  client.falharPrecoVenda = scenario.falhar_preco_venda ?? false;
+
   const allToolsCalled: string[] = [];
   const allToolCallDetails: Array<{ name: string; inputSummary: string }> = [];
   let lastResponse = "";
+  let lastTexto = "";
   let lastTransferMotivo: string | undefined;
   let transferencias = 0;
 
   for (const [i, msg] of scenario.mensagens.entries()) {
+    if (scenario.envelhecer_cotacoes_antes_da_ultima && !agenteApi && i === scenario.mensagens.length - 1) {
+      for (const c of Object.values(state.cotacoes ?? {})) c.em = new Date(Date.now() - 2 * 3_600_000).toISOString();
+    }
     const userMsg = msg.startsWith("/arte ")
       ? `[IMAGEM enviada: ${msg.slice(6).trim()}]`
       : msg;
@@ -126,7 +145,11 @@ async function runScenario(scenario: Scenario): Promise<{ passed: number; failed
     const result = agenteApi
       ? await turnoPelaApi(agenteApi, capturado, telefone, userMsg, `${scenario.id}-${i}`)
       : await runTurn(userMsg, state, llm, client, logger);
-    if (result.response) lastResponse = result.response;
+    // O que o cliente viu: cartões e texto. Pela API, a resposta já vem junta.
+    const visto = agenteApi ? result.response : [...(result.cartoes ?? []).map((c) => c.legenda), result.response].filter(Boolean).join("\n\n");
+    const textoDoModelo = agenteApi ? ((result as TurnResult & { textoDoModelo?: string | null }).textoDoModelo ?? null) : result.response;
+    if (visto) lastResponse = visto;
+    if (textoDoModelo) lastTexto = textoDoModelo;
     for (const tc of result.toolsCalled) {
       allToolsCalled.push(tc.name);
       allToolCallDetails.push(tc);
@@ -186,6 +209,12 @@ async function runScenario(scenario: Scenario): Promise<{ passed: number; failed
         });
         break;
 
+      case "texto_nao_contem":
+        results.push({
+          passed: !new RegExp(exp.padrao!, "i").test(lastTexto),
+          msg: `texto_nao_contem (só o texto do modelo): /${exp.padrao}/`,
+        });
+        break;
       case "resposta_nao_contem":
         results.push({
           passed: !new RegExp(exp.padrao!, "i").test(lastResponse),
@@ -245,7 +274,7 @@ async function main() {
   let totalFailed = 0;
   const resultados: ResultadoCenario[] = [];
 
-  const specificScenario = process.argv.slice(2).find((a) => !a.startsWith("--") && !VALORES_DE_FLAG.has(a));
+  const escolhidos = new Set(process.argv.slice(2).filter((a) => !a.startsWith("--") && !VALORES_DE_FLAG.has(a)));
 
   console.log(`\n${BOLD}=== Evals — Agente de Atendimento ===${RESET}\n`);
   if (VIA_API) console.log(`${GRAY}Rodando pela API definitiva (AgenteDefinitivo), não pelo runTurn direto.${RESET}\n`);
@@ -255,7 +284,7 @@ async function main() {
 
   for (const file of files) {
     const scenario = JSON.parse(readFileSync(join(scenariosDir, file), "utf-8")) as Scenario;
-    if (specificScenario && scenario.id !== specificScenario) continue;
+    if (escolhidos.size && !escolhidos.has(scenario.id)) continue;
     const resultado: ResultadoCenario = { id: scenario.id, descricao: scenario.descricao, critico: !!scenario.critico, rodadas: [] };
     resultados.push(resultado);
 

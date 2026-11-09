@@ -20,6 +20,8 @@ import type {
   OrderListResponse,
 } from "./client.js";
 import { ApiError } from "./errors.js";
+import { ErroPrecoVenda } from "./precoVenda.js";
+import { centavosNaTabela } from "../../catalogo/faixasDeVenda.js";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const mocksDir = join(__dir, "../../../mocks");
@@ -36,6 +38,16 @@ export class MockBrindeMeClient implements BrindeMeClient {
   private budgetsByIdempotencyKey: Map<string, Budget> = new Map();
   /** Orçamentos criados de fato (a repetição pela Idempotency-Key não conta): o eval 27 confere duplicata. */
   orcamentosCriados = 0;
+
+  /** Simula a rota de preço da vitrine fora do ar (evals de preço indisponível). */
+  falharPrecoVenda = false;
+
+  async precoVenda(subprodutoId: string, quantidades: number[]): Promise<Map<number, number>> {
+    if (this.falharPrecoVenda) throw new ErroPrecoVenda("indisponivel", "vitrine fora (simulado)");
+    const sub = loadJson<Product[]>("products.json").flatMap((p) => p.subproducts).find((s) => s.id === subprodutoId);
+    if (!sub) throw new ErroPrecoVenda("formato", "subproduto inexistente", { status: 404 });
+    return new Map(quantidades.map((q) => [q, centavosNaTabela(sub.prices, q)]));
+  }
 
   injectFault(fault: FaultConfig): void {
     this.fault = { ...fault };
@@ -115,7 +127,7 @@ export class MockBrindeMeClient implements BrindeMeClient {
       const priceRange = found.sub.prices.find(
         (r) => item.quantity >= r.min && item.quantity <= r.max
       );
-      const unitPrice = priceRange?.price ?? found.product.price;
+      const unitPrice = priceRange?.price ?? 0;
       return {
         subproduct_id: item.subproduct_id,
         quantity: item.quantity,

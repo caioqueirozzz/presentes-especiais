@@ -26,8 +26,15 @@ import { createInitialState } from "../src/agent/state.js";
 const fixture = (nome: string): unknown =>
   JSON.parse(readFileSync(join(process.cwd(), "tests/fixtures", nome), "utf-8"));
 
+/** A rota de preço de venda da vitrine (app3): 68 centavos em toda quantidade pedida. */
+function vitrine(url: string): Response | null {
+  const m = /\/api\/subproduct\/[^/]+\/price\/([\d,]+)/.exec(url);
+  if (!m) return null;
+  return new Response(JSON.stringify({ prices: Object.fromEntries(m[1].split(",").map((q) => [q, 68])) }), { status: 200 });
+}
+
 function clientComResposta(payload: unknown) {
-  vi.stubGlobal("fetch", async () => new Response(JSON.stringify(payload), { status: 200 }));
+  vi.stubGlobal("fetch", async (url: string) => vitrine(String(url)) ?? new Response(JSON.stringify(payload), { status: 200 }));
   return new HttpBrindeMeClient({
     baseUrl: "https://api.brinde.me",
     token: "fixture",
@@ -56,11 +63,9 @@ describe("contrato — GET /product", () => {
     }
   });
 
-  it("preço e imagem vêm normalizados mesmo na listagem", async () => {
+  it("imagem e código vêm normalizados mesmo na listagem", async () => {
     const c = clientComResposta(fixture("product-list.json"));
     const [p] = (await c.listProducts()).data;
-    expect(typeof p.price).toBe("number");
-    expect(p.price).toBeLessThan(1000); // já convertido de centavos
     expect(p.images[0]?.url).toMatch(/^https?:\/\//);
     expect(p.code).toEqual(expect.any(String));
   });
@@ -101,7 +106,7 @@ describe("contrato — GET /product/{id}", () => {
     )) as {
       nome: string;
       min_quantity: number;
-      subprodutos_ativos: Array<{ cor: string; sku: string; estoque: number }>;
+      subprodutos_ativos: Array<{ cor: string; estoque: number }>;
       imagens: string[];
       preco_para_quantidade_a_partir_de: number | null;
     };
@@ -110,7 +115,6 @@ describe("contrato — GET /product/{id}", () => {
     expect(r.min_quantity).toBeGreaterThan(0);
     expect(r.subprodutos_ativos.length).toBeGreaterThan(0);
     expect(r.subprodutos_ativos[0].cor).toBeTruthy();
-    expect(r.subprodutos_ativos[0].sku).toBeTruthy();
     expect(r.imagens.length).toBeGreaterThan(0);
     expect(r.preco_para_quantidade_a_partir_de).toBeGreaterThan(0);
   });
@@ -215,6 +219,8 @@ describe("contrato — catálogo: listagem real → índice → recomendação",
     const lista = fixture("product-list.json");
     const detalhe = fixture("product-detail.json") as { data: Record<string, unknown> };
     vi.stubGlobal("fetch", async (url: string) => {
+      const v = vitrine(String(url));
+      if (v) return v;
       const m = /\/product\/([^?/]+)/.exec(String(url));
       if (m) {
         if (contador) contador.detalhes++;
@@ -250,14 +256,13 @@ describe("contrato — catálogo: listagem real → índice → recomendação",
       c
     )) as {
       resultado: string;
-      produtos?: Array<{ cores_disponiveis: string[]; sku: string; preco_unitario_na_quantidade: number }>;
+      produtos?: Array<{ cores_disponiveis: string[]; preco_unitario_na_quantidade: number }>;
     };
 
     expect(r.resultado).toBe("produtos_encontrados");
     // o detalhe foi lido na sincronização E conferido de novo na recomendação
     expect(contador.detalhes).toBeGreaterThan(2);
     expect(r.produtos?.[0].cores_disponiveis.length).toBeGreaterThan(0);
-    expect(r.produtos?.[0].sku).toBeTruthy();
     // preço real em centavos (68) convertido para reais
     expect(r.produtos?.[0].preco_unitario_na_quantidade).toBeLessThan(10);
   });

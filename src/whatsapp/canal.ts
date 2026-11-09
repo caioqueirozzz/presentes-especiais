@@ -35,6 +35,8 @@ export interface CanalWhatsApp {
   aoMensagem(handler: (m: MensagemRecebida) => void): void;
   aoPronto(handler: () => void): void;
   enviar(chatId: string, texto: string): Promise<void>;
+  /** Foto com legenda. O .webp do CDN chega como foto; como documento, não chega (sonda de 05/11). */
+  enviarImagem(chatId: string, url: string, legenda: string): Promise<void>;
   /** Mostra "digitando…" por `duracaoMs` (padrão: 4s). */
   digitando(chatId: string, duracaoMs?: number): Promise<void>;
   pararDigitando(chatId: string): Promise<void>;

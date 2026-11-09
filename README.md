@@ -213,6 +213,8 @@ Guia para a equipe da loja: **[docs/base-de-conhecimento.md](docs/base-de-conhec
 ```bash
 npm run sync:catalogo                  # catálogo → índice (rodar de hora em hora)
 npm run sync:catalogo -- --forcar      # relê o detalhe de todos os produtos ativos
+npm run sync:precos                    # preço de venda do site → índice (job noturno, fora do agente)
+npm run sync:precos -- --migrar        # uma vez, ao trocar o índice v1 (custo) pelo v2 (venda)
 npm run kb:validar                     # estado da base por categoria e responsável
 npm run kb:validar -- --exigir-aprovacao   # falha se houver item não aprovado (gate de release)
 npm run kb:lacunas                     # perguntas que a base não soube responder

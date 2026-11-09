@@ -8,6 +8,7 @@ import type {
   RespostaEvento,
   RespostaMensagens,
 } from "../contrato/esquemas.js";
+import { itensDosCartoes } from "../tools/cartao.js";
 import { formatarParaWhatsApp, loteParaTexto } from "../contrato/texto.js";
 import { addMessage, limparNomeWhatsapp, type ConversationState } from "../agent/state.js";
 import { runTurn, type TurnResult } from "../agent/runTurn.js";
@@ -176,7 +177,7 @@ export class AgenteDefinitivo implements Agente {
         this.deps.aoTurno?.(r);
         if (!r.response) return concluir(respostaDeTransferencia(conversa, pedido.telefone, transferencia));
         return concluir({
-          respostas: formatarParaWhatsApp(r.response),
+          respostas: [...itensDosCartoes(r.cartoes ?? []), ...formatarParaWhatsApp(r.response)],
           modo: estado.modo,
           avisoAtendente: formatarAvisoTransferencia(pedido.telefone, transferencia.resumo, transferencia.lacunas),
         });
@@ -184,7 +185,7 @@ export class AgenteDefinitivo implements Agente {
       if (!r.response) throw new Error("resposta vazia do modelo");
       this.deps.aoTurno?.(r);
       conversa.respostasRecentes.push(new Date().toISOString());
-      return concluir({ respostas: formatarParaWhatsApp(r.response), modo: estado.modo });
+      return concluir({ respostas: [...itensDosCartoes(r.cartoes ?? []), ...formatarParaWhatsApp(r.response)], modo: estado.modo });
     } catch (err) {
       if (controle.signal.reason instanceof AtendenteAssumiu) {
         logger.log({ type: "state_change", change: "turno_interrompido_pelo_atendente" });

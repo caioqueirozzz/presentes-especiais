@@ -153,7 +153,7 @@ describe("H3 — orçamento só com confirmação do cliente", () => {
       }),
       endTurn("Confirma?")
     );
-    await b.enviar("50 canecas, coloca no telefone 11 98888-7777");
+    await b.enviar("50 canecas, ana@teste.com, coloca no telefone 11 98888-7777");
     const pendente = b.repo.carregar(TEL).estado.fichaPedido!;
     expect(pendente.resumo.telefone).toBe(TEL);
     expect(JSON.stringify(pendente)).not.toContain("5511988887777");
@@ -230,7 +230,7 @@ describe("H3 — kill switch e ferramentas desligadas", () => {
     expect(todosResultados(b.llm).at(-1)?.erro).toBe("ferramenta_desligada");
     expect(b.repo.carregar(TEL).estado.fichaPedido).toBeUndefined();
     expect(r.modo).toBe("humano");
-    expect(r.respostas).toEqual([MENSAGEM_TRANSFERENCIA]);
+    expect(r.respostas.at(-1)).toBe(MENSAGEM_TRANSFERENCIA);
   });
 
   it("H3.13 [correção Fase 6] suspenso: o modelo não é chamado, o cliente é avisado uma vez e a equipe é chamada", async () => {

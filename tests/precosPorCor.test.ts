@@ -17,13 +17,6 @@ const comPrecosDistintos = produtos.find(
   (p) => new Set(p.subproducts.filter((s) => s.status).map((s) => JSON.stringify(s.prices))).size > 1
 )!;
 
-/** Produto cujas cores compartilham a mesma tabela. */
-const comPrecoUniforme = produtos.find(
-  (p) =>
-    p.subproducts.filter((s) => s.status).length > 1 &&
-    new Set(p.subproducts.filter((s) => s.status).map((s) => JSON.stringify(s.prices))).size === 1
-)!;
-
 describe("preços por cor", () => {
   let client: MockBrindeMeClient;
   let state: ReturnType<typeof createInitialState>;
@@ -36,38 +29,14 @@ describe("preços por cor", () => {
 
   it("os mocks realmente têm produto com preço variando por cor", () => {
     expect(comPrecosDistintos).toBeDefined();
-    expect(comPrecoUniforme).toBeDefined();
   });
 
-  it("cada subproduto carrega a própria tabela de preços", async () => {
-    const r = (await detalharProdutoHandler(
-      { produto_id: comPrecosDistintos.id },
-      state,
-      client
-    )) as {
-      precos_variam_por_cor: boolean;
-      tabela_precos: unknown;
-      subprodutos_ativos: Array<{ cor: string; tabela_precos: Array<{ preco: number }> }>;
+  it("sem quantidade não sai preço nenhum: o preço só vem da cotação exata", async () => {
+    const r = (await detalharProdutoHandler({ produto_id: comPrecosDistintos.id }, state, client)) as Record<string, unknown> & {
+      subprodutos_ativos: Array<{ preco_para_quantidade: number | null }>;
     };
-
-    expect(r.precos_variam_por_cor).toBe(true);
-    // tabela única fica null: forçar o agente a olhar por cor
-    expect(r.tabela_precos).toBeNull();
-
-    const assinaturas = new Set(r.subprodutos_ativos.map((s) => JSON.stringify(s.tabela_precos)));
-    expect(assinaturas.size).toBeGreaterThan(1);
-  });
-
-  it("mantém tabela única quando todas as cores custam igual", async () => {
-    const r = (await detalharProdutoHandler(
-      { produto_id: comPrecoUniforme.id },
-      state,
-      client
-    )) as { precos_variam_por_cor: boolean; tabela_precos: Array<{ preco: number }> };
-
-    expect(r.precos_variam_por_cor).toBe(false);
-    expect(Array.isArray(r.tabela_precos)).toBe(true);
-    expect(r.tabela_precos.length).toBeGreaterThan(0);
+    expect(r.tabela_precos).toBeUndefined();
+    expect(r.subprodutos_ativos.every((s) => s.preco_para_quantidade === null)).toBe(true);
   });
 
   it("preco_para_quantidade de cada cor reflete a faixa daquela cor", async () => {

@@ -58,7 +58,6 @@ describe("buscar_produtos (ferramenta)", () => {
       total_estimado: 1540,
       min_quantity: 25,
       cores_disponiveis: ["Branco", "Preto"],
-      imagem_url: "https://cdn.teste/caneca.jpg",
       subprodutos: [
         { subproduto_id: "c-bco", cor: "Branco" },
         { subproduto_id: "c-pto", cor: "Preto" },
@@ -168,7 +167,7 @@ describe("buscar_produtos (ferramenta)", () => {
       expect(r.motivo).toBe("regras_nao_fecham");
       expect(r.razao).toMatch(/pedido mínimo/);
       expect(r.ajustes_sugeridos).toEqual([
-        { tipo: "aumentar_quantidade", produto_id: "squeeze", nome: "Squeeze de Alumínio", quantidade: 50, preco_unitario: 12, total_estimado: 600 },
+        { tipo: "aumentar_quantidade", produto_id: "squeeze", nome: "Squeeze de Alumínio", quantidade: 50, preco_unitario: 12, total_estimado: 600, cor: "Azul" },
       ]);
       expect(r.instrucao_ao_agente).toMatch(/Não cite produto/);
     });

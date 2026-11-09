@@ -5,6 +5,7 @@ import { RepositorioConversas } from "../conversas/repositorio.js";
 import { FileProductIndexStore, sincronizarCatalogo } from "../catalogo/indice.js";
 import { createBrindeMeClient } from "../integrations/brindeme/factory.js";
 import { criarLLM } from "../llm/index.js";
+import { exigirAmbiente } from "../operacao/exigirAmbiente.js";
 import { avisarConhecimentoECatalogo } from "../partida.js";
 import { AgenteDefinitivo } from "./agenteDefinitivo.js";
 
@@ -12,6 +13,7 @@ const SEIS_HORAS_MS = 6 * 3_600_000;
 const CONCORRENCIA_MAX_DO_SYNC = 2;
 
 async function main(): Promise<void> {
+  exigirAmbiente("agente");
   const prazos = conferirPrazos(config.agente.tetoMs, config.whatsapp.agenteTimeoutMs);
   if (prazos) {
     console.error(prazos);

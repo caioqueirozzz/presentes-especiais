@@ -8,6 +8,48 @@ describe("envio", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  it("foto: sai como imagem com legenda, e o eco (a legenda) é reconhecido como nosso", async () => {
+    const canal = new WhatsAppFalso();
+    const envio = new Envio(canal, 20);
+    const ecos: boolean[] = [];
+    canal.aoMensagem((m) => ecos.push(envio.ehMinha(m.telefone!, m.texto)));
+    const foto = { imagem_url: "https://cdn.brinde.me/x.webp", legenda: "*Caneca*" };
+    const enviado = envio.paraCliente("5583999990000", CLIENTE, foto);
+    await vi.runAllTimersAsync();
+    expect(await enviado).toBe(true);
+    expect(canal.imagens).toEqual([{ chatId: CLIENTE, url: foto.imagem_url, legenda: "*Caneca*" }]);
+    expect(canal.enviadas).toEqual([]);
+    expect(ecos).toEqual([true]);
+  });
+
+  it("foto que falha: a legenda vai como texto", async () => {
+    const canal = new WhatsAppFalso();
+    const envio = new Envio(canal, 20);
+    canal.falharImagem.set("https://cdn.brinde.me/x.webp", 1);
+    const enviado = envio.paraCliente("5583999990000", CLIENTE, { imagem_url: "https://cdn.brinde.me/x.webp", legenda: "*Caneca*" });
+    await vi.runAllTimersAsync();
+    expect(await enviado).toBe(true);
+    expect(canal.imagens).toEqual([]);
+    expect(canal.enviadas.map((e) => e.texto)).toEqual(["*Caneca*"]);
+  });
+
+  it("foto que nunca resolve: passado o prazo, a legenda sai como texto", async () => {
+    const canal = new WhatsAppFalso();
+    canal.enviarImagem = () => new Promise<void>(() => {});
+    const envio = new Envio(canal, 20);
+    const enviado = envio.paraCliente("5583999990000", CLIENTE, { imagem_url: "https://cdn.brinde.me/x.webp", legenda: "*Caneca*" });
+    await vi.runAllTimersAsync();
+    expect(await enviado).toBe(true);
+    expect(canal.enviadas.map((e) => e.texto)).toEqual(["*Caneca*"]);
+  });
+
+  it("imagemDe devolve a URL da foto registrada com aquela legenda, sem consumir", () => {
+    const r = new RegistroSaida();
+    r.registrar("5583999990000", "*Caneca*", "https://cdn.brinde.me/x.webp");
+    expect(r.imagemDe("5583999990000", "*Caneca*")).toBe("https://cdn.brinde.me/x.webp");
+    expect(r.consumir("5583999990000", "*Caneca*")).toBe(true);
+  });
+
   it("limitador deixa 20 por minuto e segura o 21º até a janela abrir", async () => {
     const limitador = new LimitadorEnvios(20);
     for (let i = 0; i < 20; i++) await limitador.aguardarVez();

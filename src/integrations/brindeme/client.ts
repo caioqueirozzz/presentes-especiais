@@ -45,6 +45,11 @@ export interface CreateBudgetOptions {
 export interface BrindeMeClient {
   listProducts(params?: ListProductsParams): Promise<ProductListResponse>;
   getProduct(id: string): Promise<Product>;
+  /**
+   * Preço de venda do site de um subproduto, em centavos por unidade, por quantidade. 0 = "a consultar".
+   * Lança ErroPrecoVenda quando não dá para saber.
+   */
+  precoVenda(subprodutoId: string, quantidades: number[]): Promise<Map<number, number>>;
   createBudget(body: CreateBudgetBody, options?: CreateBudgetOptions): Promise<Budget>;
   getBudget(id: string): Promise<Budget>;
   getOrder(id: string): Promise<Order>;

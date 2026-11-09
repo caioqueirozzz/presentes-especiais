@@ -69,8 +69,9 @@ export function verificarAmbiente(
   if ((env.LLM_API ?? "chat") === "responses") aviso("LLM_API", "responses não foi validada nos evals; o piloto foi homologado com chat");
 
   // API da loja
-  const modo = env.BRINDEME_MODE ?? "mock";
-  if (modo === "mock") naProducao("BRINDEME_MODE", "mock: preços, estoque e pedidos são de mentira");
+  const modo = (env.BRINDEME_MODE ?? "").trim();
+  if (!modo) naProducao("BRINDEME_MODE", "ausente: diga mock ou http no .env (sem padrão, para a produção nunca cair no mock sem avisar)");
+  else if (modo === "mock") naProducao("BRINDEME_MODE", "mock: preços, estoque e pedidos são de mentira");
   else if (modo !== "http") erro("BRINDEME_MODE", `valor desconhecido "${modo}" (use mock ou http)`);
   else {
     if (ehExemplo(env.BRINDEME_BASE_URL)) erro("BRINDEME_BASE_URL", "vazia ou exemplo com BRINDEME_MODE=http");
@@ -87,6 +88,12 @@ export function verificarAmbiente(
   } else ok("base de conhecimento", `${fatos.itensAprovados} item(ns) aprovado(s)`);
   if (fatos.produtosNoIndice === 0) naProducao("catálogo", "índice vazio: rode npm run sync:catalogo antes de ligar");
   else ok("catálogo", `${fatos.produtosNoIndice} produto(s) no índice`);
+
+  // CRM: desligado só de propósito
+  const crmLigado = !!(env.CRM_URL ?? "").trim() && (env.CRM_INTEGRATION_SECRET ?? "").length >= 16;
+  if (crmLigado) ok("CRM", (env.CRM_URL ?? "").trim());
+  else if ((env.CRM ?? "").trim() === "desligado") aviso("CRM", "desligado de propósito (CRM=desligado): conversas e pedidos não chegam ao painel");
+  else naProducao("CRM", "CRM_URL vazio ou CRM_INTEGRATION_SECRET com menos de 16 caracteres: sem painel e sem histórico do cliente. Se é de propósito, ponha CRM=desligado");
 
   // WhatsApp e limites
   const prazos = conferirPrazos(inteiro(env.TURNO_TETO_MS, 90_000), inteiro(env.AGENTE_TIMEOUT_MS, 120_000));
