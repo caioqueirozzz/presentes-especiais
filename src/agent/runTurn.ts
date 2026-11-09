@@ -1,5 +1,5 @@
 import { readFileSync } from "fs";
-import type { Cartao } from "../tools/cartao.js";
+import { semRepetirCartoes, textoDosCartoes, type Cartao } from "../tools/cartao.js";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import type { LLMProvider, LLMMessage } from "../llm/types.js";
@@ -476,6 +476,22 @@ export async function runTurn(
         }
       }
 
+      // O resumo do orçamento vai como veio, com tópicos e valores: não passa pelo filtro.
+      const comResumo = toolsCalled.some((t) => t.name === "preparar_orcamento");
+      // Só na busca: o detalhar traz avisos (sem estoque, abaixo do mínimo, sem quantidade) que o texto precisa dizer.
+      const soBusca = toolsCalled.some((t) => t.name === "buscar_produtos") && !toolsCalled.some((t) => t.name === "detalhar_produto");
+      if (!transferred && !comResumo && soBusca && cartoes.length > 0) {
+        const primeiroContato = !state.historico.some((m) => m.role === "assistant");
+        const nome = state.cliente.nome ?? state.cliente.nomeWhatsapp;
+        const saudacao = primeiroContato ? `Olá${nome ? `, ${nome}` : ""}! Sou a ${config.assistantName}, da ${config.storeName} 😊` : undefined;
+        text = textoDosCartoes(cartoes.length, saudacao);
+        logger.log({ type: "state_change", change: "texto_fixo_com_cartao" });
+      } else if (!transferred && !comResumo) {
+        const limpo = semRepetirCartoes(text);
+        if (limpo !== text) logger.log({ type: "state_change", change: "cartao_redigitado_removido" });
+        text = limpo;
+      }
+
       logger.log({
         type: "response_sent",
         content: text,
@@ -485,7 +501,7 @@ export async function runTurn(
       });
 
       // O histórico guarda o que o cliente viu: o modelo do turno seguinte e o CRM leem os cartões daqui.
-      const visto = [...cartoes.map((c) => c.legenda), text].filter(Boolean).join("\n\n");
+      const visto = [text, ...cartoes.map((c) => c.legenda)].filter(Boolean).join("\n\n");
       if (visto) addMessage(state, "assistant", visto);
       continueLoop = false;
 

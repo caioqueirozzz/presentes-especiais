@@ -142,7 +142,13 @@ export class CanalWwebjs implements CanalWhatsApp {
   }
 
   async iniciar(): Promise<void> {
-    await this.lancar();
+    try {
+      await this.lancar();
+    } catch (err) {
+      // O vigia da abertura segue armado e relança em até 2 min: falhar na partida não pode matar a ponte.
+      this.opcoes.log({ type: "abertura_falhou", erro: String(err) });
+      console.warn(`WhatsApp não abriu (${String(err)}); nova tentativa em até ${ABERTURA_TIMEOUT_MS / 1000}s.`);
+    }
     this.instalarVigias();
   }
 
@@ -222,6 +228,8 @@ export class CanalWwebjs implements CanalWhatsApp {
     const versao = this.versoes[this.indiceVersao];
     const cliente = new Client({
       authStrategy: new LocalAuth({ dataPath: this.opcoes.sessaoDir, clientId: "presentes-especiais" }),
+      // O padrão (30 s) estoura antes do vigia com o PC lento: o vigia decide quando relançar.
+      authTimeoutMs: ABERTURA_TIMEOUT_MS,
       puppeteer: {
         headless: true,
         ...(this.opcoes.chromePath ? { executablePath: this.opcoes.chromePath } : {}),
@@ -295,7 +303,16 @@ export class CanalWwebjs implements CanalWhatsApp {
     });
     cliente.on("disconnected", (motivo) => void this.aoDesconectar(cliente, String(motivo)));
 
-    await cliente.initialize();
+    try {
+      await cliente.initialize();
+    } catch (err) {
+      // A reconexão derrubou o Chrome desta abertura no meio ("Navigating frame was detached"): a falha é do cliente velho.
+      if (this.cliente !== cliente) {
+        this.opcoes.log({ type: "abertura_substituida", erro: String(err) });
+        return;
+      }
+      throw err;
+    }
   }
 
   private async converter(msg: Message): Promise<MensagemRecebida> {
@@ -406,14 +423,17 @@ export class CanalWwebjs implements CanalWhatsApp {
     try {
       const antigo = this.cliente;
       this.cliente = null;
-      // destroy(), nunca logout(): logout apaga a sessão e obriga a escanear o QR de novo.
-      if (antigo) await this.derrubar(antigo);
+      try {
+        // destroy(), nunca logout(): logout apaga a sessão e obriga a escanear o QR de novo.
+        if (antigo) await this.derrubar(antigo);
+      } finally {
+        this.reconectando = false;
+      }
+      // Fora da trava: se esta abertura também pendurar, o vigia dela precisa poder relançar.
       await this.lancar();
     } catch (err) {
       this.opcoes.log({ type: "reconexao_falhou", erro: String(err) });
       console.error(`🚨 Reconexão do WhatsApp falhou (${String(err)}). A ponte está parada até reconectar; se repetir, reinicie o processo.`);
-    } finally {
-      this.reconectando = false;
     }
   }
 

@@ -3,7 +3,7 @@
  *
  *   npm run sync:precos                    # noturno: reconsulta o site para cada grupo de cores
  *   npm run sync:precos -- --migrar        # uma vez: índice v1 (custo) → v2 (venda), sem guardar custo
- *   npm run sync:precos -- --concorrencia 3
+ *   npm run sync:precos -- --concorrencia 1
  *
  * Só fala com a rota da vitrine, não com a API oficial. Mais de 5% dos grupos com falha: não grava nada e sai com 1.
  * Grupo que falhou na migração fica sem faixas (fora da busca) até o próximo sync:precos.
@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   }
   const vitrine = new PrecoVendaHttp();
   const consultar = (id: string, qs: number[]) => vitrine.consultar(id, qs);
-  const concorrencia = numero("concorrencia", 3);
+  const concorrencia = numero("concorrencia", 1);
   const arquivo = arquivoIndicePadrao("http");
   const store = new FileProductIndexStore(arquivo);
   const inicio = Date.now();
@@ -51,7 +51,7 @@ async function main(): Promise<void> {
     const novo = await recalcularPrecos(esqueletoV2(v1), consultar, { concorrencia, onProgresso });
     const gravou = novo.falhas.length / Math.max(1, novo.grupos) <= FRACAO_MAXIMA_DE_FALHAS;
     if (gravou) store.salvar(novo.indice);
-    r = { grupos: novo.grupos, atualizados: novo.atualizados, falhas: novo.falhas, gravou };
+    r = { grupos: novo.grupos, atualizados: novo.atualizados, semPreco: novo.semPreco, falhas: novo.falhas, gravou };
   } else {
     r = await sincronizarPrecos(store, consultar, { concorrencia, onProgresso });
     if (r.grupos === 0) {
@@ -60,7 +60,7 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log(`${r.atualizados}/${r.grupos} grupos atualizados em ${Math.round((Date.now() - inicio) / 1000)}s; ${r.falhas.length} falha(s).`);
+  console.log(`${r.atualizados}/${r.grupos} grupos atualizados em ${Math.round((Date.now() - inicio) / 1000)}s; ${r.semPreco} sem preço no site (todas as cores 404); ${r.falhas.length} falha(s).`);
   for (const f of r.falhas.slice(0, 20)) console.log(`  falhou: produto ${f.produto_id} grupo ${f.grupo_preco}: ${f.erro}`);
   if (!r.gravou) {
     console.error(`ALERTA: mais de ${FRACAO_MAXIMA_DE_FALHAS * 100}% dos grupos falharam; nada foi gravado.`);

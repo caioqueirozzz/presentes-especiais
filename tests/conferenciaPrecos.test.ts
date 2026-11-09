@@ -23,6 +23,12 @@ describe("conferência de preços: sorteio reproduzível", () => {
     expect(qs.every((q) => q >= 10 && q <= 5000)).toBe(true);
     expect(new Set(qs).size).toBe(4);
   });
+
+  it("quantidades: nada acima do maior estoque do produto", () => {
+    const qs = quantidadesDeTeste([{ min: 10, max: 99 }, { min: 100, max: 4999 }], 10, sorteador(3), 3, 120);
+    expect(qs[0]).toBe(10);
+    expect(qs.every((q) => q <= 120)).toBe(true);
+  });
 });
 
 import { decidirSaida, sondarRitmo } from "../src/operacao/conferenciaPrecos.js";

@@ -4,6 +4,7 @@
  */
 import { cotou, type Cotacao, type ResultadoCotacao } from "../catalogo/cotacao.js";
 import type { ItemResposta } from "../contrato/esquemas.js";
+import { formatarParaWhatsApp } from "../contrato/texto.js";
 import { reais } from "./prepararOrcamento.js";
 
 export interface Cartao {
@@ -79,7 +80,43 @@ function condicao(comPreco: Array<{ cotacao: Cotacao }>): string {
 
 const urlDeImagem = (u: string | null): u is string => !!u && /^https?:\/\//i.test(u) && URL.canParse(u);
 
+/** Tópico ou linha com rótulo de campo do cartão: "- **Preço:** a confirmar", "• *Camisa*", "1. Camisa — R$ 42,41". */
+const ROTULO_DO_CARTAO = /^\s*(?:(?:[-•·*]|\d+[.)])\s*)?\**\s*(?:cor(?:es)?|quantidade|pre[çc]o[^:\n]*|valor[^:\n]*|condi[çc][ãa]o[^:\n]*|a partir de[^:\n]*)\s*\**\s*:/i;
+const TOPICO_DE_PRODUTO = /^\s*(?:[-•·]|\d+[.)])\s*(?:\*{1,2}[^*\n]+\*{1,2}\s*:?\s*$|.*R\$)/;
+/** Linhas da legenda copiadas do histórico: título sozinho em negrito e o preço "R$ X/un". */
+const LINHA_DE_LEGENDA = /^\s*\*{1,2}[^*\n]+\*{1,2}\s*$|\/un\b/i;
+export const SO_PERGUNTA = "Qual dessas opções te agrada?";
+
+/**
+ * O modelo redigita o cartão mesmo proibido pelo prompt, e sem o preço inventa "a confirmar" (dogfooding de 09/11).
+ * Vale em todo turno: sem chamar a busca, ele também copia o cartão que está no histórico.
+ */
+export function semRepetirCartoes(texto: string): string {
+  // Resposta vazia é falha do modelo e tem tratamento próprio: não vira pergunta.
+  if (!texto.trim()) return texto;
+  const limpo = texto
+    .split("\n")
+    .filter((l) => !ROTULO_DO_CARTAO.test(l) && !TOPICO_DE_PRODUTO.test(l) && !LINHA_DE_LEGENDA.test(l))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return limpo || SO_PERGUNTA;
+}
+
 /** URL ruim derrubaria o parse da resposta na ponte e o turno inteiro: aí o cartão vai como texto. */
 export function itensDosCartoes(cartoes: Cartao[]): ItemResposta[] {
   return cartoes.map((c) => (urlDeImagem(c.imagem_url) ? { imagem_url: c.imagem_url, legenda: c.legenda } : c.legenda));
+}
+
+/** Com cartão no turno o texto é fixo: o modelo vazava jargão ("cartões enviados") e listava o produto (dogfooding de 09/11). */
+export function textoDosCartoes(quantos: number, saudacao?: string): string {
+  const frase = quantos === 1 ? "Separei esta opção para você. Te agrada?" : "Separei estas opções para você. Qual te agrada?";
+  return saudacao ? `${saudacao} ${frase}` : frase;
+}
+
+/** Com cartão: o texto do modelo num balão só, antes dos cartões (dogfooding de 09/11: 4 balões era carga demais). */
+export function respostasDoTurno(cartoes: Cartao[], texto: string): ItemResposta[] {
+  const partes = formatarParaWhatsApp(texto);
+  if (cartoes.length === 0) return partes;
+  return [...(partes.length ? [partes.join("\n\n")] : []), ...itensDosCartoes(cartoes)];
 }

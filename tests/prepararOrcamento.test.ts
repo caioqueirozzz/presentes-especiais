@@ -94,6 +94,18 @@ describe("prepararOrcamento", () => {
     expect(state.fichaPedido?.resumo).toMatchObject({ prazo_desejado: "até 10/12", personalizacao: "tem arte, 2 cores" });
   });
 
+  it("id do produto e só uma cor cobre a quantidade: usa essa cor, sem perguntar (loop do dogfooding de 09/11)", async () => {
+    const limpo = createInitialState("5583999990000");
+    limpo.produtosDiscutidos.push("prod-001");
+    const r = await prepararOrcamentoHandler(
+      { ...validInput, itens: [{ subproduto_id: "prod-001", quantidade: 250 }] },
+      limpo,
+      client
+    );
+    expect(r).toMatchObject({ status: "estimativa_pronta" });
+    expect(JSON.stringify(r)).toContain("Branco");
+  });
+
   it("id do produto no lugar do subproduto: devolve as cores com o id certo (eval 05)", async () => {
     const limpo = createInitialState("5583999990000");
     limpo.produtosDiscutidos.push("prod-001");

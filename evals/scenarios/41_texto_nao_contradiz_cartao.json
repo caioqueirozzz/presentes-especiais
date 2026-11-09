@@ -1,0 +1,11 @@
+{
+  "id": "41_texto_nao_contradiz_cartao",
+  "descricao": "Dogfooding de 09/11: com cartão de preço, o texto não repete o cartão nem diz que o preço é a confirmar",
+  "mensagens": ["oi, quero 50 canecas personalizadas"],
+  "expectativas": [
+    { "tipo": "chamou_ferramenta", "ferramenta": "buscar_produtos" },
+    { "tipo": "resposta_contem", "padrao": "R\\$\\s*\\d" },
+    { "tipo": "texto_nao_contem", "padrao": "a confirmar" },
+    { "tipo": "texto_nao_contem", "padrao": "(?:^|\\n)\\s*(?:[-•·*]|\\d+[.)])?\\s*\\**\\s*(?:cor(?:es)?|quantidade|pre[çc]o[^:\\n]*)\\s*\\**\\s*:" }
+  ]
+}

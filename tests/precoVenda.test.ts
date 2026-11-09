@@ -74,6 +74,14 @@ describe("rota de preço da vitrine (app3)", () => {
     expect(b.esperas).toEqual([10_000, 10_000, 10_000]);
   });
 
+  it("429 não abre o disjuntor: a loja está de pé, só pediu ritmo", async () => {
+    const r429 = json({}, 429);
+    const { v } = vitrine(Array.from({ length: 8 }, () => r429));
+    await expect(v.consultar("a", [10])).rejects.toMatchObject({ motivo: "limite" });
+    await expect(v.consultar("b", [10])).rejects.toMatchObject({ motivo: "limite" });
+    expect(v.disjuntor.estado).toBe("fechado");
+  });
+
   it("5xx tenta mais uma vez; duas vezes é rede", async () => {
     const a = vitrine([json({}, 502), json({ prices: { "10": 7 } })]);
     expect((await a.v.consultar("s", [10])).get(10)).toBe(7);
