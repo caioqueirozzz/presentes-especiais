@@ -134,6 +134,11 @@ Os evals rodam com o modelo real e vetores reais do mock (gerar com `gerar:vetor
 - O Gui cria só as interfaces `TipoStore` e `VectorStore` e a versão em arquivo.
 - A versão Postgres (`pgvector`) e a migration são do João, na Fase 1, atrás das mesmas interfaces.
 - Nada nesta fase lê ou escreve no Neon.
+- **Contrato com a Fase 1 (combinado em 09/11):** as duas interfaces já nascem assíncronas, para não serem refeitas quando o banco entrar:
+  - `carregar(): Promise<...>` e `salvar(...): Promise<void>`.
+  - A busca não espera o banco a cada pergunta: carrega uma vez na partida (e de novo depois do sync), guarda o retrato em memória e consulta esse retrato de forma síncrona.
+  - O `ProductIndexStore` e os outros stores vão pelo mesmo caminho na Fase 1. A busca deve receber o índice já carregado, sem chamar `carregar()` por dentro.
+- A Fase 1 começa pelo que não encosta na busca (conversas, pedidos, lacunas, orçamentos de teste e estado da ponte). Catálogo, tipos e vetores ficam prontos atrás das interfaces e entram quando a `busca-semantica` voltar.
 
 ## 10. Entrega
 
