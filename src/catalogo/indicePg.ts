@@ -1,4 +1,4 @@
-import type { Banco } from "../db/banco.js";
+import { jsonb, type Banco } from "../db/banco.js";
 import { indiceVazio, VERSAO_INDICE, type IndiceCatalogo, type ProdutoIndexado } from "./indice.js";
 
 const LOTE = 500;
@@ -31,7 +31,7 @@ export class PgProductIndexStore {
           `INSERT INTO agente.produtos (id, doc, atualizado_em)
            SELECT p->>'id', p, now() FROM jsonb_array_elements($1::jsonb) AS p
            ON CONFLICT (id) DO UPDATE SET doc = EXCLUDED.doc, atualizado_em = now()`,
-          [JSON.stringify(lote)]
+          [jsonb(lote)]
         );
       }
       await tx.query(

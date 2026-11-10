@@ -40,6 +40,7 @@ try {
   console.log(`conversa  ${String(plano.telefones.length).padStart(5)} no banco`);
   for (const t of plano.telefones.slice(0, 20)) console.log(`   ${t}`);
   console.log(`lacunas   ${String(plano.lacunas).padStart(5)} no banco`);
+  console.log(`corrompida${String(plano.corrompidas).padStart(5)} no banco`);
   console.log(`ponte     ${String(plano.registrosPonte).padStart(5)} registro(s) no banco`);
   for (const tipo of ["artes", "log"] as const) {
     const doTipo = alvos.filter((a) => a.tipo === tipo);
@@ -50,7 +51,7 @@ try {
   }
 
   const comando = telefone ? `--telefone ${telefone}` : `--dias ${dias}`;
-  if (alvos.length === 0 && plano.telefones.length === 0 && plano.lacunas === 0 && plano.registrosPonte === 0) console.log(telefone ? "\nNada guardado desse telefone." : "\nNada passou do prazo.");
+  if (alvos.length === 0 && plano.telefones.length === 0 && plano.lacunas === 0 && plano.corrompidas === 0 && plano.registrosPonte === 0) console.log(telefone ? "\nNada guardado desse telefone." : "\nNada passou do prazo.");
   else if (!executar) console.log(`\nSimulação. Para apagar: npm run limpar:dados -- ${comando} --executar`);
   else {
     await executarPlano(banco, plano, telefone ? null : { dias, agora });

@@ -11,7 +11,7 @@
  * que é consultado só depois da validação.
  */
 import type { BrindeMeClient } from "./client.js";
-import type { Banco } from "../../db/banco.js";
+import { jsonb, type Banco } from "../../db/banco.js";
 import { normalizePhone } from "../../agent/state.js";
 
 export interface PedidoIndexado {
@@ -58,7 +58,7 @@ export class PgOrderIndexStore implements OrderIndexStore {
         `INSERT INTO agente.pedidos (id, codigo, telefone, email, status, criado_em, sincronizado_em)
          SELECT id, codigo, telefone, email, status, criado_em, sincronizado_em
          FROM jsonb_to_recordset($1::jsonb) AS p(id TEXT, codigo TEXT, telefone TEXT, email TEXT, status TEXT, criado_em TEXT, sincronizado_em TEXT)`,
-        [JSON.stringify(pedidos)]
+        [jsonb(pedidos)]
       );
     });
   }

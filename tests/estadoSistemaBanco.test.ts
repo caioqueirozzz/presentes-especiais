@@ -91,6 +91,14 @@ describe("estado do sistema no banco", () => {
     expect(lerEstadoSistema().suspenso).toBe(true);
   });
 
+  it("escrita que falha deixa o estado anterior e propaga o erro", async () => {
+    banco = await bancoDeTeste();
+    parar = await ligarEstadoSistema(banco, 60_000);
+    await banco.query("DROP TABLE agente.estado_sistema");
+    await expect(escreverEstadoSistema({ suspenso: true })).rejects.toThrow();
+    expect(lerEstadoSistema().suspenso).toBe(false);
+  });
+
   it("ligar duas vezes deixa uma releitura só", async () => {
     banco = await bancoDeTeste();
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });

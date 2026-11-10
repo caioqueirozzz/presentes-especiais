@@ -23,7 +23,7 @@ export const consultarConhecimentoSchema = z.object({
 
 export type ConsultarConhecimentoInput = z.infer<typeof consultarConhecimentoSchema>;
 
-/** Injetáveis para teste; em produção lêem a pasta base/ e gravam em data/lacunas.jsonl. */
+/** Injetáveis para teste; em produção lêem a pasta base/ e gravam em agente.lacunas. */
 let basePadrao: BaseConhecimento | null = null;
 let lacunasPadrao: LacunaStore | null = null;
 

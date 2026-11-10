@@ -202,7 +202,7 @@ Guia para a equipe da loja: **[docs/base-de-conhecimento.md](docs/base-de-conhec
 
 ### O que ficou pronto
 
-- **Ferramenta `consultar_conhecimento`**: responde dúvidas gerais só com item aprovado; sem resposta na base, registra a **lacuna** (`data/lacunas.jsonl`, mascarada) e devolve `instrucao: "transferir"` com `motivo_sugerido: "lacuna_conhecimento"`. O log do turno guarda os `id`s usados (`kb_consulta`, `kb_itens` em `response_sent`).
+- **Ferramenta `consultar_conhecimento`**: responde dúvidas gerais só com item aprovado; sem resposta na base, registra a **lacuna** (tabela `agente.lacunas`, mascarada) e devolve `instrucao: "transferir"` com `motivo_sugerido: "lacuna_conhecimento"`. O log do turno guarda os `id`s usados (`kb_consulta`, `kb_itens` em `response_sent`).
 - **Índice do catálogo** (`data/produtos-index.json`): nome, descrição, categorias, cores com estoque, faixas de preço, mínimo, imagem principal e personalizações. Incremental por `updated_at`; ver decisão 21 para as regras de segurança.
 - **Recomendação em 5 passos** (`src/catalogo/recomendar.ts`): filtros rígidos → ordem por similaridade, ocasião e destaque → até 3 opções com preço da faixa e total → reconferência na API → sem resultado: explica e propõe o ajuste mais próximo (aumentar quantidade, reduzir quantidade ou subir o valor), **verificado pelas mesmas regras**.
 - `buscar_produtos` ganhou `orcamento_total` (exige `quantidade`) e passa a devolver `total_estimado`. Sem quantidade, devolve `preco_a_partir_de` na quantidade mínima, com aviso.

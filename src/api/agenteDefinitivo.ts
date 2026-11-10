@@ -1,6 +1,7 @@
 import { ConversaDesconhecidaError, TurnoEmAndamentoError, type Agente } from "../contrato/agente.js";
 import { lerEstadoSistema, type EstadoSistema } from "../controle/estadoSistema.js";
 import { config } from "../config.js";
+import { logarErroBanco } from "../db/banco.js";
 import type {
   Evento,
   MensagemLote,
@@ -171,7 +172,7 @@ export class AgenteDefinitivo implements Agente {
       const r = await runTurn(texto, estado, this.deps.llm, this.deps.client, logger, {
         signal: controle.signal,
         aoEfeito: () => {
-          this.deps.repo.salvar(conversa).catch((err) => logger.log({ type: "alerta", gravidade: "alta", motivo: "conversa_nao_salva", erro: String(err).slice(0, 300) }));
+          this.deps.repo.salvar(conversa).catch((err) => logger.log({ type: "alerta", gravidade: "alta", motivo: "conversa_nao_salva", ...logarErroBanco(err) }));
         },
         aoTransferir: (resumo, lacunas) => {
           conversa.transferenciaPendente = { resumo, lacunas };
@@ -274,7 +275,12 @@ export class AgenteDefinitivo implements Agente {
     });
     delete conversa.falhasPorTurno[pedido.turnoId];
     delete conversa.transferenciaPendente;
-    await this.deps.repo.salvar(conversa);
+    // Banco fora não pode virar falha do LLM: a resposta já existe e segue para o cliente.
+    await this.deps.repo
+      .salvar(conversa)
+      .catch((err) =>
+        new Logger(conversa.estado.conversaId, { turnoId: pedido.turnoId }).log({ type: "alerta", gravidade: "alta", motivo: "conversa_nao_salva", ...logarErroBanco(err) })
+      );
     return resposta;
   }
 }

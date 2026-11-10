@@ -1,5 +1,5 @@
 import type { Banco } from "../db/banco.js";
-import { logarErroBanco } from "../db/banco.js";
+import { jsonb, logarErroBanco } from "../db/banco.js";
 
 const RELEITURA_MS = 30_000;
 
@@ -57,13 +57,16 @@ export function lerEstadoSistema(): EstadoSistema {
 
 export async function escreverEstadoSistema(estado: EstadoSistema): Promise<void> {
   versao++;
-  atual = estado;
-  if (!banco) return;
+  if (!banco) {
+    atual = estado;
+    return;
+  }
   await banco.query(
     `INSERT INTO agente.estado_sistema (id, estado, atualizado_em) VALUES (1, $1::jsonb, now())
      ON CONFLICT (id) DO UPDATE SET estado = EXCLUDED.estado, atualizado_em = now()`,
-    [JSON.stringify(estado)]
+    [jsonb(estado)]
   );
+  atual = estado; // só depois do INSERT: se o banco falhar, o valor visível não muda
 }
 
 /** Volta ao padrão e desliga o banco. Usado nos testes. */

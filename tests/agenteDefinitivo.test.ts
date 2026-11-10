@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { AgenteDefinitivo, MSG_FALHA, MSG_LIMITE } from "../src/api/agenteDefinitivo.js";
 import { MemoriaConversas, type ArmazemConversas } from "../src/conversas/armazem.js";
-import { RepositorioConversas } from "../src/conversas/repositorio.js";
+import { RepositorioConversas, type Conversa } from "../src/conversas/repositorio.js";
 import { TurnoEmAndamentoError } from "../src/contrato/agente.js";
 import { calcularTurnoId } from "../src/contrato/turno.js";
+import { Logger } from "../src/logging/logger.js";
 import { MockBrindeMeClient } from "../src/integrations/brindeme/mockClient.js";
 import type { BrindeMeClient } from "../src/integrations/brindeme/client.js";
 import { setBaseConhecimento, setLacunaStore } from "../src/tools/consultarConhecimento.js";
@@ -60,6 +61,36 @@ describe("AgenteDefinitivo", () => {
     const reiniciado = montar(llm, { armazem }).agente;
     expect(await reiniciado.processarLote(p)).toEqual(a);
     expect(llm.seen).toHaveLength(1);
+  });
+
+  it("banco fora na gravação final: o turno devolve a resposta e não conta como falha do modelo", async () => {
+    class BancoCaido extends MemoriaConversas {
+      caido = false;
+      override async gravar(t: string, doc: unknown): Promise<void> {
+        if (this.caido) throw Object.assign(new Error("connection terminated"), { code: "57P01" });
+        return super.gravar(t, doc);
+      }
+    }
+    const armazem = new BancoCaido();
+    const logs: Array<Record<string, unknown>> = [];
+    const espia = vi.spyOn(Logger.prototype, "log").mockImplementation((e) => void logs.push(e as Record<string, unknown>));
+    const llm = new ScriptedLLM([endTurn("Oi, tudo bem?")]);
+    const { agente, repo } = montar(llm, { armazem });
+    await repo.carregar(TEL);
+    armazem.caido = true;
+
+    const r = await agente.processarLote(pedido(TEL, ["r1"], "meu segredo do cliente"));
+    espia.mockRestore();
+
+    expect(r.respostas).toEqual(["Oi, tudo bem?"]);
+    // O histórico em memória (o que o próximo turno vê) guarda a pergunta e a resposta.
+    const c = (agente as unknown as { conversas: Map<string, { conversa: Conversa }> }).conversas.get(TEL)!.conversa;
+    expect(c.estado.historico.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(c.falhasPorTurno).toEqual({});
+    const aviso = logs.find((l) => l.motivo === "conversa_nao_salva");
+    expect(aviso).toMatchObject({ code: "57P01", message: "connection terminated" });
+    expect(JSON.stringify(aviso)).not.toContain("meu segredo do cliente");
+    expect(logs.some((l) => String(l.motivo).startsWith("falha_no_turno"))).toBe(false);
   });
 
   it("primeira carga simultânea da mesma conversa usa um objeto só", async () => {

@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Evento, ItemResposta, Modo } from "../contrato/esquemas.js";
 import { itemRespostaSchema } from "../contrato/esquemas.js";
 import type { LogPonte } from "./log.js";
-import type { Banco } from "../db/banco.js";
+import { jsonb, type Banco } from "../db/banco.js";
 
 /** Partes da resposta às mensagens `ids` que já chegaram ao cliente. */
 export interface EntregaParcial {
@@ -79,7 +79,7 @@ export class PgEstadoPonte implements ArmazemPonte {
     await this.banco.query(
       `INSERT INTO agente.estado_ponte (id, doc, atualizado_em) VALUES (1, $1::jsonb, now())
        ON CONFLICT (id) DO UPDATE SET doc = EXCLUDED.doc, atualizado_em = now()`,
-      [JSON.stringify(estado)]
+      [jsonb(estado)]
     );
   }
 }

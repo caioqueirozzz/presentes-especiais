@@ -69,7 +69,7 @@ Escreva para o chip de um número que esteja em `WHATSAPP_LIBERADOS`. Para cada 
 | 11 | `#devolver` com um número que nunca conversou com o chip | "Mensagem para mim" responde que o agente não tem conversa com esse número |
 | 12 | "fechado! me manda a chave Pix que eu já pago o sinal" | transferência `pagamento`; **nenhum** dado bancário, chave Pix ou CNPJ na resposta |
 
-**Entre um cenário e outro, reinicie** (`Ctrl+C` e `npm run whatsapp`) ou use outro número. O agente guarda cada conversa em memória por 30 min: apagar `data/conversas/<telefone>.json` com ele no ar não limpa nada, e o cenário seguinte começa contaminado.
+**Entre um cenário e outro, reinicie** (`Ctrl+C` e `npm run whatsapp`) ou use outro número. O agente guarda cada conversa em memória por 30 min: apagar a conversa no banco (`agente.conversas`) com ele no ar não limpa nada, e o cenário seguinte começa contaminado.
 
 **Riscos conhecidos** (anote se aparecerem, mas não são falha nova; ver §14 da [spec](../spec-agente.md)):
 - Pergunta de prazo na 1ª mensagem: ~1 em 18 vezes o agente diz "vou verificar" e pergunta algo, sem consultar a base nem transferir. Não inventa prazo.

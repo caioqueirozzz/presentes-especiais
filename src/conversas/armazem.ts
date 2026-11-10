@@ -1,4 +1,4 @@
-import type { Banco } from "../db/banco.js";
+import { jsonb, type Banco } from "../db/banco.js";
 
 /** Só guarda e devolve o documento; validação e cortes ficam no RepositorioConversas. */
 export interface ArmazemConversas {
@@ -36,7 +36,7 @@ export class PgConversas implements ArmazemConversas {
     await this.banco.query(
       `INSERT INTO agente.conversas (telefone, doc, atualizado_em) VALUES ($1, $2::jsonb, now())
        ON CONFLICT (telefone) DO UPDATE SET doc = EXCLUDED.doc, atualizado_em = now()`,
-      [telefone, JSON.stringify(doc)]
+      [telefone, jsonb(doc)]
     );
   }
 
@@ -44,7 +44,7 @@ export class PgConversas implements ArmazemConversas {
     await this.banco.transacao(async (tx) => {
       await tx.query("INSERT INTO agente.conversas_corrompidas (telefone, doc, erro) VALUES ($1, $2::jsonb, $3)", [
         telefone,
-        JSON.stringify(doc),
+        jsonb(doc),
         erro.slice(0, 500),
       ]);
       await tx.query("DELETE FROM agente.conversas WHERE telefone = $1", [telefone]);

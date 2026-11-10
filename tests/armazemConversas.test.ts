@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { MemoriaConversas, PgConversas, type ArmazemConversas } from "../src/conversas/armazem.js";
 import { RepositorioConversas, MAX_IDS_VISTOS } from "../src/conversas/repositorio.js";
-import type { Banco } from "../src/db/banco.js";
+import { jsonb, type Banco } from "../src/db/banco.js";
 import { bancoDeTeste } from "./helpers/bancoDeTeste.js";
 
 const TEL = "5583999990000";
@@ -93,5 +93,18 @@ describe.each(versoes)("RepositorioConversas sobre %s", (_nome, criar) => {
   it("telefone inválido é recusado antes de chegar ao armazém", async () => {
     const repo = new RepositorioConversas(await criar());
     await expect(repo.carregar("../etc")).rejects.toThrow(/telefone inválido/);
+  });
+});
+
+describe("NUL no texto do cliente", () => {
+  it("jsonb tira o caractere NUL real e preserva o '\u0000' digitado", () => {
+    expect(JSON.parse(jsonb({ t: "a\u0000b" })).t).toBe("ab");
+    expect(JSON.parse(jsonb({ t: String.raw`a\u0000b` })).t).toBe(String.raw`a\u0000b`);
+  });
+
+  it("conversa com NUL grava e relê sem ele", async () => {
+    const armazem = new PgConversas((banco = await bancoDeTeste()));
+    await armazem.gravar(TEL, { texto: "a\u0000b" });
+    expect(await armazem.ler(TEL)).toEqual({ texto: "ab" });
   });
 });

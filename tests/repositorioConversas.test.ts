@@ -56,4 +56,18 @@ describe("RepositorioConversas", () => {
     await repo.salvar(c);
     expect((await new RepositorioConversas(armazem).carregar(TEL)).turnos).toHaveLength(1);
   });
+
+  it("gravação rejeitada não quebra a cadeia: a seguinte grava", async () => {
+    const repo = new RepositorioConversas(armazem);
+    const c = await repo.carregar(TEL);
+    const real = armazem.gravar.bind(armazem);
+    armazem.gravar = async () => {
+      armazem.gravar = real;
+      throw new Error("banco fora");
+    };
+    await expect(repo.salvar(c)).rejects.toThrow("banco fora");
+    c.idsVistos.push("m1");
+    await repo.salvar(c);
+    expect((await new RepositorioConversas(armazem).carregar(TEL)).idsVistos).toEqual(["m1"]);
+  });
 });
