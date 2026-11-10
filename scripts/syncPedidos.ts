@@ -9,8 +9,9 @@
  */
 import "dotenv/config";
 import { createBrindeMeClient } from "../src/integrations/brindeme/factory.js";
-import { sincronizarPedidos, FileOrderIndexStore } from "../src/integrations/brindeme/orderIndex.js";
+import { sincronizarPedidos, PgOrderIndexStore } from "../src/integrations/brindeme/orderIndex.js";
 import { config } from "../src/config.js";
+import { abrirBanco } from "../src/db/banco.js";
 
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
@@ -31,13 +32,18 @@ async function main() {
   console.log(`${GRAY}  modo: ${config.brindeMe.mode} · janela: ${dias} dias${RESET}\n`);
 
   const client = createBrindeMeClient();
-  const store = new FileOrderIndexStore();
+  const banco = await abrirBanco();
+  const store = new PgOrderIndexStore(banco);
 
-  const r = await sincronizarPedidos(client, store, { dias });
+  try {
+    const r = await sincronizarPedidos(client, store, { dias });
 
-  console.log(`${GREEN}✓${RESET} ${r.lidos} pedido(s) lido(s) em ${r.paginas} página(s)`);
-  console.log(`${GRAY}  ${r.novos} novo(s) · ${r.atualizados} atualizado(s)${RESET}`);
-  console.log(`${GRAY}  índice: data/pedidos-index.json${RESET}`);
+    console.log(`${GREEN}✓${RESET} ${r.lidos} pedido(s) lido(s) em ${r.paginas} página(s)`);
+    console.log(`${GRAY}  ${r.novos} novo(s) · ${r.atualizados} atualizado(s)${RESET}`);
+    console.log(`${GRAY}  índice: agente.pedidos${RESET}`);
+  } finally {
+    await banco.fechar();
+  }
 }
 
 main().catch((err) => {

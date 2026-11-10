@@ -1,6 +1,5 @@
 import "dotenv/config";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { createInitialState } from "../src/agent/state.js";
@@ -12,6 +11,7 @@ import type { FaultType } from "../src/integrations/brindeme/types.js";
 import { prepararAmbienteDosEvals } from "./ambiente.js";
 import type { TurnResult } from "../src/agent/runTurn.js";
 import { AgenteDefinitivo } from "../src/api/agenteDefinitivo.js";
+import { MemoriaConversas } from "../src/conversas/armazem.js";
 import { RepositorioConversas } from "../src/conversas/repositorio.js";
 import { calcularTurnoId } from "../src/contrato/turno.js";
 import { LIMITE_TEXTO } from "../src/contrato/esquemas.js";
@@ -109,7 +109,7 @@ async function runScenario(scenario: Scenario): Promise<{ passed: number; failed
   const capturado: { r?: TurnResult } = {};
   const agenteApi = VIA_API
     ? new AgenteDefinitivo({
-        repo: new RepositorioConversas(mkdtempSync(join(tmpdir(), `eval-${scenario.id}-`))),
+        repo: new RepositorioConversas(new MemoriaConversas()),
         llm,
         client,
         tetoMs: config.agente.tetoMs,

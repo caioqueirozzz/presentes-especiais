@@ -1,9 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { dirname } from "path";
+import type { Banco } from "../db/banco.js";
 import { normalizarTelefone } from "./telefone.js";
 
 /*
- * Modo de atendimento da Lia, escolhido no CRM (aba Conexão) e guardado em disco pela ponte:
+ * Modo de atendimento da Lia, escolhido no CRM (aba Conexão) e guardado no banco pela ponte:
  *  ligada    — responde a todo cliente que escrever no número da loja
  *  teste     — responde só aos números de teste; os demais ficam para a equipe
  *  desligada — não responde ninguém; as mensagens continuam chegando ao CRM
@@ -56,28 +55,49 @@ export function iaAtende(config: ConfigLia, telefone: string): boolean {
   return config.numerosTeste.includes(normalizarTelefone(telefone));
 }
 
-export class ArquivoModoLia {
+export interface ArmazemModoLia {
+  ler(): Promise<ConfigLia>;
+  salvar(config: Omit<ConfigLia, "atualizadoEm">): Promise<ConfigLia>;
+}
+
+function lerSalvo(salvo: unknown, padrao: ConfigLia): ConfigLia {
+  if (!salvo || typeof salvo !== "object") return padrao;
+  const valido = validarConfigLia(salvo as Record<string, unknown>);
+  if (typeof valido === "string") return padrao;
+  const em = (salvo as Record<string, unknown>).atualizadoEm;
+  return { ...valido, atualizadoEm: typeof em === "string" ? em : null };
+}
+
+export class MemoriaModoLia implements ArmazemModoLia {
+  private salvo: ConfigLia | null = null;
+  constructor(private readonly padrao: ConfigLia) {}
+  async ler(): Promise<ConfigLia> {
+    return this.salvo ?? this.padrao;
+  }
+  async salvar(config: Omit<ConfigLia, "atualizadoEm">): Promise<ConfigLia> {
+    this.salvo = { ...config, atualizadoEm: new Date().toISOString() };
+    return this.salvo;
+  }
+}
+
+export class PgModoLia implements ArmazemModoLia {
   constructor(
-    private readonly arquivo: string,
+    private readonly banco: Banco,
     private readonly padrao: ConfigLia
   ) {}
 
-  ler(): ConfigLia {
-    if (!existsSync(this.arquivo)) return this.padrao;
-    try {
-      const salvo = JSON.parse(readFileSync(this.arquivo, "utf-8")) as Record<string, unknown>;
-      const valido = validarConfigLia(salvo);
-      if (typeof valido === "string") return this.padrao;
-      return { ...valido, atualizadoEm: typeof salvo.atualizadoEm === "string" ? salvo.atualizadoEm : null };
-    } catch {
-      return this.padrao;
-    }
+  async ler(): Promise<ConfigLia> {
+    const [linha] = await this.banco.query<{ config: unknown }>("SELECT config FROM agente.modo_lia WHERE id = 1");
+    return lerSalvo(linha?.config, this.padrao);
   }
 
-  salvar(config: Omit<ConfigLia, "atualizadoEm">): ConfigLia {
+  async salvar(config: Omit<ConfigLia, "atualizadoEm">): Promise<ConfigLia> {
     const completo: ConfigLia = { ...config, atualizadoEm: new Date().toISOString() };
-    mkdirSync(dirname(this.arquivo), { recursive: true });
-    writeFileSync(this.arquivo, JSON.stringify(completo, null, 2), "utf-8");
+    await this.banco.query(
+      `INSERT INTO agente.modo_lia (id, config, atualizado_em) VALUES (1, $1::jsonb, now())
+       ON CONFLICT (id) DO UPDATE SET config = EXCLUDED.config, atualizado_em = now()`,
+      [JSON.stringify(completo)]
+    );
     return completo;
   }
 }

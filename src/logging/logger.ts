@@ -21,7 +21,7 @@ type LogEvent =
   | { type: "kb_consulta"; pergunta: string; itens: string[]; resultado: "encontrado" | "lacuna" }
   | { type: "transfer"; motivo: string; prioridade: string }
   | { type: "state_change"; change: string }
-  | { type: "alerta"; gravidade: "critica" | "alta"; motivo: string; ferramenta?: string };
+  | { type: "alerta"; gravidade: "critica" | "alta"; motivo: string; ferramenta?: string; erro?: string };
 
 function maskCpf(s: string): string {
   return s.replace(/\d{3}\.\d{3}\.\d{3}-\d{2}/g, (m) => `***.***.***-${m.slice(-2)}`);

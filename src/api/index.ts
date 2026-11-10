@@ -1,10 +1,15 @@
 import "dotenv/config";
 import { config, conferirPrazos } from "../config.js";
 import { criarServidorAgente } from "../contrato/servidorHttp.js";
+import { PgConversas } from "../conversas/armazem.js";
+import { lerEstadoSistema, ligarEstadoSistema } from "../controle/estadoSistema.js";
+import { abrirBanco } from "../db/banco.js";
+import { ligarStores } from "../db/stores.js";
 import { RepositorioConversas } from "../conversas/repositorio.js";
 import { FileProductIndexStore, sincronizarCatalogo } from "../catalogo/indice.js";
 import { createBrindeMeClient } from "../integrations/brindeme/factory.js";
 import { criarLLM } from "../llm/index.js";
+import { MSG_SUSPENSO } from "../operacao/verificacaoAmbiente.js";
 import { exigirAmbiente } from "../operacao/exigirAmbiente.js";
 import { avisarConhecimentoECatalogo } from "../partida.js";
 import { AgenteDefinitivo } from "./agenteDefinitivo.js";
@@ -14,6 +19,10 @@ const CONCORRENCIA_MAX_DO_SYNC = 2;
 
 async function main(): Promise<void> {
   exigirAmbiente("agente");
+  const banco = await abrirBanco();
+  await ligarEstadoSistema(banco);
+  ligarStores(banco);
+  if (lerEstadoSistema().suspenso) console.warn(`! estado-sistema: ${MSG_SUSPENSO}`);
   const prazos = conferirPrazos(config.agente.tetoMs, config.whatsapp.agenteTimeoutMs);
   if (prazos) {
     console.error(prazos);
@@ -57,7 +66,7 @@ async function main(): Promise<void> {
 
   const log = (e: Record<string, unknown>) => console.error(JSON.stringify(e));
   const agente = new AgenteDefinitivo({
-    repo: new RepositorioConversas(config.agente.conversasDir, log),
+    repo: new RepositorioConversas(new PgConversas(banco), log),
     llm,
     client,
     tetoMs: config.agente.tetoMs,

@@ -96,7 +96,7 @@ describe("H3 — orçamento só com confirmação do cliente", () => {
       }
     );
     await b.enviar("quero 50 canecas brancas, Ana Teste, ana@teste.com, já pode mandar");
-    expect(b.repo.carregar(TEL).estado.modo).toBe("ia");
+    expect((await b.repo.carregar(TEL)).estado.modo).toBe("ia");
 
     b.llm.roteiro(enviarFicha, endTurn("Enviei para a equipe."));
     const r = await b.enviar("sim, confirmo");
@@ -115,7 +115,7 @@ describe("H3 — orçamento só com confirmação do cliente", () => {
       return endTurn("Resumo: 50 canecas brancas. Confirma?");
     });
     await b.enviar("50 canecas brancas, Ana Teste, ana@teste.com", { id: "resumo-1" });
-    expect(b.repo.carregar(TEL).estado.modo).toBe("ia");
+    expect((await b.repo.carregar(TEL)).estado.modo).toBe("ia");
   });
 
   it("H3.5 [R5] enviar para emitir sem estimativa é recusado: o modelo precisa preparar antes", async () => {
@@ -154,7 +154,7 @@ describe("H3 — orçamento só com confirmação do cliente", () => {
       endTurn("Confirma?")
     );
     await b.enviar("50 canecas, ana@teste.com, coloca no telefone 11 98888-7777");
-    const pendente = b.repo.carregar(TEL).estado.fichaPedido!;
+    const pendente = (await b.repo.carregar(TEL)).estado.fichaPedido!;
     expect(pendente.resumo.telefone).toBe(TEL);
     expect(JSON.stringify(pendente)).not.toContain("5511988887777");
   });
@@ -177,7 +177,7 @@ describe("H3 — erro do modelo não é falha de sistema", () => {
     const r = await b.enviar("quero ver meu pedido");
     expect(todosResultados(b.llm).map((x) => x.erro)).toEqual(["parametros_invalidos", "parametros_invalidos", "parametros_invalidos"]);
     expect(r.modo).toBe("ia");
-    expect(b.repo.carregar(TEL).estado.falhasConsecutivas).toBe(0);
+    expect((await b.repo.carregar(TEL)).estado.falhasConsecutivas).toBe(0);
   });
 });
 
@@ -190,7 +190,7 @@ describe("H3 — base de conhecimento e arte", () => {
     }, endTurn("Vou chamar alguém."));
     const r = await b.enviar("posso retirar na loja?");
     expect(JSON.stringify(b.llm.chamadas)).not.toContain("Retirada gratuita");
-    expect(b.lacunas.listar().map((l) => l.pergunta)).toContain("posso retirar na loja?");
+    expect((await b.lacunas.listar()).map((l) => l.pergunta)).toContain("posso retirar na loja?");
     expect(r.avisoAtendente).toContain("Pergunta sem resposta: posso retirar na loja?");
   });
 
@@ -203,7 +203,7 @@ describe("H3 — base de conhecimento e arte", () => {
     );
     await b.enviar("mandei o logo.png ontem");
     expect(todosResultados(b.llm).map((x) => x.erro)).toEqual(["arquivo_nao_recebido", "formato_nao_aceito"]);
-    expect(b.repo.carregar(TEL).estado.artes).toHaveLength(0);
+    expect((await b.repo.carregar(TEL)).estado.artes).toHaveLength(0);
   });
 });
 
@@ -212,7 +212,7 @@ describe("H3 — logs", () => {
     const b = await montarBancada();
     b.llm.roteiro(endTurn("Anotado."));
     await b.enviar("meu cpf é 123.456.789-00, e-mail fulano.detal@empresa.com, fone (83) 98765-4321 e 5583987654321");
-    const arquivo = join(process.cwd(), "logs", `${b.repo.carregar(TEL).estado.conversaId}.jsonl`);
+    const arquivo = join(process.cwd(), "logs", `${(await b.repo.carregar(TEL)).estado.conversaId}.jsonl`);
     expect(existsSync(arquivo)).toBe(true);
     const log = readFileSync(arquivo, "utf-8");
     for (const dado of ["123.456.789-00", "fulano.detal@", "98765-4321", "5583987654321"]) expect(log).not.toContain(dado);
@@ -228,7 +228,7 @@ describe("H3 — kill switch e ferramentas desligadas", () => {
     }), endTurn("Confirma?"));
     const r = await b.enviar("50 canecas brancas, Ana Teste, ana@teste.com");
     expect(todosResultados(b.llm).at(-1)?.erro).toBe("ferramenta_desligada");
-    expect(b.repo.carregar(TEL).estado.fichaPedido).toBeUndefined();
+    expect((await b.repo.carregar(TEL)).estado.fichaPedido).toBeUndefined();
     expect(r.modo).toBe("humano");
     expect(r.respostas.at(-1)).toBe(MENSAGEM_TRANSFERENCIA);
   });
@@ -243,7 +243,7 @@ describe("H3 — kill switch e ferramentas desligadas", () => {
     expect(r1.respostas).toEqual([MSG_SUSPENSAO]);
     expect(r1.avisoAtendente).toContain("quero um orçamento");
     expect(r2.respostas).toEqual([]);
-    expect(b.repo.carregar(TEL).estado.historico.map((m) => m.content)).toEqual(
+    expect((await b.repo.carregar(TEL)).estado.historico.map((m) => m.content)).toEqual(
       expect.arrayContaining(["oi, quero um orçamento", "alô?"])
     );
 
@@ -265,7 +265,7 @@ describe("H3 — kill switch e ferramentas desligadas", () => {
       const controle: ControleAgente = {
         suspender: () => {},
         retomar: () => {},
-        desligar: (f) => estado.ferramentasDesligadas.push(f),
+        desligar: (f) => void estado.ferramentasDesligadas.push(f),
         religar: () => {},
         estado: () => estado,
       };

@@ -50,7 +50,6 @@ export const config = {
     maxRetries: int(process.env.BRINDEME_MAX_RETRIES, 2),
     maxEsperaRetryMs: int(process.env.BRINDEME_MAX_ESPERA_RETRY_MS, 10_000),
     /** Orçamentos TESTE da escrita simulada (removida em 25/10, R5): o arquivo antigo ainda passa pelo limpar:dados. */
-    orcamentosTesteArquivo: process.env.ORCAMENTOS_TESTE_ARQUIVO ?? "data/orcamentos-teste.json",
   },
 
   conhecimento: {
@@ -74,7 +73,6 @@ export const config = {
   agente: {
     porta: int(process.env.AGENTE_PORTA, 3030),
     url: (process.env.AGENTE_URL ?? "http://127.0.0.1:3030").replace(/\/+$/, ""),
-    conversasDir: process.env.CONVERSAS_DIR ?? "data/conversas",
     /** Precisa ficar FOLGA_PRAZOS_MS abaixo de AGENTE_TIMEOUT_MS da ponte (120s): ver conferirPrazos. */
     tetoMs: int(process.env.TURNO_TETO_MS, 90_000),
     respostasPorHora: int(process.env.RESPOSTAS_POR_HORA, 30),
@@ -87,12 +85,9 @@ export const config = {
 
   whatsapp: {
     sessaoDir: process.env.WHATSAPP_SESSAO_DIR ?? "data/whatsapp-sessao",
-    estadoArquivo: process.env.PONTE_ESTADO_ARQUIVO ?? "data/ponte-estado.json",
     parearTelefone: (process.env.WHATSAPP_PAREAR_TELEFONE ?? "").replace(/\D/g, ""),
     versaoWeb: process.env.WHATSAPP_WEB_VERSAO ?? "",
     liberados: digitos(process.env.WHATSAPP_LIBERADOS),
-    /** Modo da Lia escolhido no CRM (ligada/teste/desligada). Sem o arquivo, vale WHATSAPP_LIBERADOS. */
-    modoLiaArquivo: process.env.LIA_MODO_ARQUIVO ?? "data/lia-modo.json",
     artesDir: process.env.ARTES_DIR ?? "data/artes",
     loteSilencioMs: int(process.env.LOTE_SILENCIO_MS, 5_000),
     loteMaxMs: int(process.env.LOTE_MAX_MS, 30_000),

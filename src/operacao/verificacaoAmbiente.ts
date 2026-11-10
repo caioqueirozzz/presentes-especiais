@@ -7,6 +7,9 @@ import { conferirPrazos } from "../config.js";
 import { ehFerramenta } from "../tools/nomes.js";
 import { aceitaRaciocinio } from "../llm/index.js";
 
+/** Texto do aviso de agente suspenso (partida dos processos e verificar:env). */
+export const MSG_SUSPENSO = "agente SUSPENSO (#suspender): ninguém é atendido pela IA até #retomar";
+
 export type Gravidade = "ok" | "aviso" | "erro";
 
 export interface Achado {
@@ -22,8 +25,8 @@ export interface FatosAmbiente {
   produtosNoIndice: number;
   /** Itens aprovados na base de conhecimento. */
   itensAprovados: number;
-  /** data/estado-sistema.json diz que o agente está suspenso. */
-  suspenso: boolean;
+  /** o estado do sistema (agente.estado_sistema) diz que o agente está suspenso. */
+  suspenso: boolean | null;
   ferramentasDesligadasRuntime: string[];
 }
 
@@ -109,7 +112,8 @@ export function verificarAmbiente(
   if (invalidas.length) erro("FERRAMENTAS_DESLIGADAS", `nome(s) que não são ferramenta: ${invalidas.join(", ")} — nada está bloqueado`);
   const desligadas = [...new Set([...desligadasEnv, ...fatos.ferramentasDesligadasRuntime])].filter(ehFerramenta);
   if (desligadas.length) aviso("ferramentas desligadas", desligadas.join(", "));
-  if (fatos.suspenso) aviso("estado-sistema", "agente SUSPENSO (#suspender): ninguém é atendido pela IA até #retomar");
+  if (fatos.suspenso === null) aviso("estado-sistema", "não verificado (banco indisponível)");
+  else if (fatos.suspenso) aviso("estado-sistema", MSG_SUSPENSO);
 
   return achados;
 }

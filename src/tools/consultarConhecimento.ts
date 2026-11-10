@@ -7,7 +7,7 @@ import {
   carregarBase,
   IDS_CATEGORIA,
 } from "../knowledge/base.js";
-import { FileLacunaStore, criarLacuna, type LacunaStore } from "../knowledge/lacunas.js";
+import { criarLacuna, type LacunaStore } from "../knowledge/lacunas.js";
 
 export const consultarConhecimentoSchema = z.object({
   pergunta: z
@@ -47,7 +47,7 @@ function getBase(): BaseConhecimento {
 }
 
 function getLacunas(): LacunaStore {
-  if (!lacunasPadrao) lacunasPadrao = new FileLacunaStore();
+  if (!lacunasPadrao) throw new Error("store de lacunas não ligado: chame ligarStores(banco) na partida");
   return lacunasPadrao;
 }
 
@@ -63,7 +63,7 @@ export async function consultarConhecimentoHandler(
 
   if (acertos.length === 0) {
     // A pergunta sem resposta vira trabalho para a loja e o cliente vai para uma pessoa.
-    getLacunas().registrar(criarLacuna(input.pergunta, state.conversaId, input.categoria));
+    await getLacunas().registrar(criarLacuna(input.pergunta, state.conversaId, input.categoria));
     return {
       resultado: "sem_resposta_na_base" as const,
       mensagem:

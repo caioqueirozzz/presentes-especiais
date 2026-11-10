@@ -10,8 +10,9 @@ import type { ClienteAgente, ResultadoLote } from "./agenteHttp.js";
 import { Atendimento } from "./atendente.js";
 import type { CanalWhatsApp, MensagemRecebida, MidiaBaixada } from "./canal.js";
 import { Envio, esperar } from "./envio.js";
-import { MemoriaEstadoPonte, type ArmazemPonte, type EntregaParcial } from "./estadoPonte.js";
+import { estadoVazio, MemoriaEstadoPonte, type ArmazemPonte, type EntregaParcial, type EstadoPonte } from "./estadoPonte.js";
 import { ConjuntoLimitado, FilaConversas, type OpcoesFila } from "./fila.js";
+import { logarErroBanco } from "../db/banco.js";
 import type { LogPonte } from "./log.js";
 import { salvarMidia, TAMANHO_MAXIMO_BYTES } from "./midia.js";
 import { iaAtende, type ConfigLia } from "./modoLia.js";
@@ -64,6 +65,8 @@ export interface OpcoesPonte {
   enviosPorMinuto: number;
   /** Onde a ponte guarda o que precisa lembrar depois de reiniciar (padrão: só memória). */
   armazem?: ArmazemPonte;
+  /** Estado lido do armazém antes de montar a ponte: o construtor não espera o banco. */
+  estadoInicial?: EstadoPonte;
   observador?: ObservadorPonte;
 }
 
@@ -104,7 +107,7 @@ export class Ponte {
   private readonly reservados = new Set<string>();
   /** Pedidos que falharam ou não terminaram de sair, na ordem; voltam antes de qualquer lote novo da conversa. */
   private readonly aRepetir = new Map<string, PedidoMensagens[]>();
-  /** Gravado em disco a cada parte enviada: depois de reiniciar, o que já chegou ao cliente não sai de novo. */
+  /** Gravado no banco a cada parte enviada: depois de reiniciar, o que já chegou ao cliente não sai de novo. */
   private readonly entregasParciais: Map<string, EntregaParcial>;
   private avisosPendentes: string[];
   private readonly liberados: Set<string>;
@@ -113,6 +116,8 @@ export class Ponte {
   private queda: { desde: number; alertado: boolean; avisados: Set<string> } | null = null;
   private varrendo = false;
   private salvamento: ReturnType<typeof setTimeout> | undefined;
+  /** Cadeia das gravações: uma antiga não chega ao banco depois da nova. */
+  private gravacao: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly canal: CanalWhatsApp,
@@ -121,7 +126,7 @@ export class Ponte {
     private readonly log: LogPonte = () => {}
   ) {
     this.armazem = opcoes.armazem ?? new MemoriaEstadoPonte();
-    const salvo = this.armazem.carregar();
+    const salvo = opcoes.estadoInicial ?? estadoVazio();
     for (const id of salvo.concluidos) this.concluidos.add(id);
     this.avisosPendentes = [...salvo.avisosPendentes];
     this.entregasParciais = new Map(Object.entries(salvo.entregasParciais ?? {}));
@@ -205,27 +210,33 @@ export class Ponte {
   }
 
   /** Grava o estado já (na saída do processo); no dia a dia ele é gravado logo depois de cada mudança. */
-  salvarAgora(): void {
+  salvarAgora(): Promise<void> {
     if (this.salvamento) clearTimeout(this.salvamento);
     this.salvamento = undefined;
     const { modos, pendentes } = this.atendimento.instantaneo();
-    try {
-      this.armazem.salvar({
-        versao: 1,
-        modos,
-        eventosPendentes: pendentes,
-        avisosPendentes: [...this.avisosPendentes],
-        concluidos: this.concluidos.valores().slice(-CONCLUIDOS_GUARDADOS),
-        entregasParciais: Object.fromEntries([...this.entregasParciais].slice(-ENTREGAS_PARCIAIS_GUARDADAS)),
+    const estado: EstadoPonte = {
+      versao: 1,
+      modos,
+      eventosPendentes: pendentes,
+      avisosPendentes: [...this.avisosPendentes],
+      concluidos: this.concluidos.valores().slice(-CONCLUIDOS_GUARDADOS),
+      entregasParciais: Object.fromEntries([...this.entregasParciais].slice(-ENTREGAS_PARCIAIS_GUARDADAS)),
+    };
+    this.gravacao = this.gravacao
+      .then(() => this.armazem.salvar(estado))
+      .catch((err) => {
+        try {
+          this.log({ type: "estado_nao_salvo", ...logarErroBanco(err) });
+        } catch {
+          // logger com defeito não pode deixar a cadeia rejeitada
+        }
       });
-    } catch (err) {
-      this.log({ type: "estado_nao_salvo", erro: String(err) });
-    }
+    return this.gravacao;
   }
 
   private agendarSalvar(): void {
     if (this.salvamento) return;
-    this.salvamento = setTimeout(() => this.salvarAgora(), SALVAR_APOS_MS);
+    this.salvamento = setTimeout(() => void this.salvarAgora(), SALVAR_APOS_MS);
   }
 
   private async receberDoCliente(m: MensagemRecebida): Promise<void> {
@@ -391,7 +402,7 @@ export class Ponte {
         return "pendente";
       }
       this.entregasParciais.set(telefone, { ids, partes: resposta.respostas.slice(0, i + 1) });
-      this.salvarAgora();
+      void this.salvarAgora();
     }
     esquecerParcial();
     if (resposta.avisoAtendente) await this.avisar(resposta.avisoAtendente);

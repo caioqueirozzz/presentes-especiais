@@ -5,11 +5,15 @@
 import { existsSync } from "fs";
 import { join } from "path";
 import { arquivoIndicePadrao, FileProductIndexStore } from "../catalogo/indice.js";
-import { lerEstadoSistema } from "../controle/estadoSistema.js";
+import { lerEstadoSistema, type EstadoSistema } from "../controle/estadoSistema.js";
 import { carregarBase } from "../knowledge/base.js";
 import { verificarAmbiente, type FatosAmbiente } from "./verificacaoAmbiente.js";
 
-export function levantarFatos(env: Record<string, string | undefined> = process.env): FatosAmbiente {
+/** `sistema` null = estado não verificado (banco indisponível). */
+export function levantarFatos(
+  env: Record<string, string | undefined> = process.env,
+  sistema: EstadoSistema | null = lerEstadoSistema()
+): FatosAmbiente {
   const modo = env.BRINDEME_MODE === "http" ? "http" : "mock";
   let produtos = 0;
   try {
@@ -17,13 +21,12 @@ export function levantarFatos(env: Record<string, string | undefined> = process.
   } catch {
     produtos = 0;
   }
-  const sistema = lerEstadoSistema();
   return {
     temArquivoEnv: existsSync(join(process.cwd(), ".env")),
     produtosNoIndice: produtos,
     itensAprovados: carregarBase({ incluirRascunhos: false }).base.estatisticas().servidos,
-    suspenso: sistema.suspenso,
-    ferramentasDesligadasRuntime: sistema.ferramentasDesligadas ?? [],
+    suspenso: sistema ? sistema.suspenso : null,
+    ferramentasDesligadasRuntime: sistema?.ferramentasDesligadas ?? [],
   };
 }
 

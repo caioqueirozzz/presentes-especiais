@@ -62,37 +62,37 @@ export function interpretarComando(texto: string): Comando | null {
   return { tipo: "desconhecido" };
 }
 
-/** Permite sobrescrever nas operações de controle em testes sem tocar o disco. */
+/** Permite sobrescrever nas operações de controle em testes sem tocar o banco. */
 export interface ControleAgente {
-  suspender(motivo?: string): void;
-  retomar(): void;
-  desligar(ferramenta: string): void;
-  religar(ferramenta: string): void;
+  suspender(motivo?: string): void | Promise<void>;
+  retomar(): void | Promise<void>;
+  desligar(ferramenta: string): void | Promise<void>;
+  religar(ferramenta: string): void | Promise<void>;
   /** Para o #status. Opcional para não quebrar controles falsos dos testes antigos. */
   estado?(): EstadoSistema;
 }
 
-function controleArquivo(): ControleAgente {
+function controleBanco(): ControleAgente {
   return {
-    suspender(motivo) {
+    async suspender(motivo) {
       const atual = lerEstadoSistema();
-      escreverEstadoSistema({ ...atual, suspenso: true, suspensoPor: motivo, suspensoEm: new Date().toISOString() });
+      await escreverEstadoSistema({ ...atual, suspenso: true, suspensoPor: motivo, suspensoEm: new Date().toISOString() });
     },
-    retomar() {
+    async retomar() {
       const atual = lerEstadoSistema();
-      escreverEstadoSistema({ ...atual, suspenso: false, suspensoPor: undefined, suspensoEm: undefined });
+      await escreverEstadoSistema({ ...atual, suspenso: false, suspensoPor: undefined, suspensoEm: undefined });
     },
-    desligar(ferramenta) {
+    async desligar(ferramenta) {
       const atual = lerEstadoSistema();
       const desligadas = new Set(atual.ferramentasDesligadas ?? []);
       desligadas.add(ferramenta);
-      escreverEstadoSistema({ ...atual, ferramentasDesligadas: [...desligadas] });
+      await escreverEstadoSistema({ ...atual, ferramentasDesligadas: [...desligadas] });
     },
-    religar(ferramenta) {
+    async religar(ferramenta) {
       const atual = lerEstadoSistema();
       const desligadas = new Set(atual.ferramentasDesligadas ?? []);
       desligadas.delete(ferramenta);
-      escreverEstadoSistema({ ...atual, ferramentasDesligadas: [...desligadas] });
+      await escreverEstadoSistema({ ...atual, ferramentasDesligadas: [...desligadas] });
     },
     estado() {
       return lerEstadoSistema();
@@ -100,7 +100,7 @@ function controleArquivo(): ControleAgente {
   };
 }
 
-/** Só o que está em data/estado-sistema.json: FERRAMENTAS_DESLIGADAS do .env vale à parte e só muda com restart. */
+/** Só o que está em agente.estado_sistema: FERRAMENTAS_DESLIGADAS do .env vale à parte e só muda com restart. */
 export function formatarStatus(estado: EstadoSistema | undefined): string {
   if (!estado) return "ℹ️ Estado do agente indisponível nesta ponte.";
   const linhas = [
@@ -142,7 +142,7 @@ export class Atendimento {
     this.modos = new Map(Object.entries(opcoes.inicial?.modos ?? {}));
     this.pendentes = [...(opcoes.inicial?.pendentes ?? [])];
     this.aoMudar = opcoes.aoMudar ?? (() => {});
-    this.controle = opcoes.controle ?? controleArquivo();
+    this.controle = opcoes.controle ?? controleBanco();
   }
 
   instantaneo(): EstadoAtendimento {
@@ -275,14 +275,14 @@ export class Atendimento {
         await this.devolver(comando.telefone, comando.nota);
         break;
       case "suspender":
-        this.controle.suspender(comando.motivo);
+        await this.controle.suspender(comando.motivo);
         this.log({ type: "agente_suspenso", motivo: comando.motivo ?? "" });
         await this.envio.paraMim(
           `⏸️ Agente suspenso${comando.motivo ? ` — ${comando.motivo}` : ""}. Use #retomar para religar.`
         );
         break;
       case "retomar":
-        this.controle.retomar();
+        await this.controle.retomar();
         this.log({ type: "agente_retomado" });
         await this.envio.paraMim("▶️ Agente retomado. Voltando a responder os clientes.");
         break;
@@ -294,7 +294,7 @@ export class Atendimento {
           );
           break;
         }
-        this.controle.desligar(comando.ferramenta);
+        await this.controle.desligar(comando.ferramenta);
         this.log({ type: "ferramenta_desligada", ferramenta: comando.ferramenta });
         await this.envio.paraMim(
           `🔒 Ferramenta "${comando.ferramenta}" desligada. Use #religar ${comando.ferramenta} para religar.`
@@ -307,7 +307,7 @@ export class Atendimento {
           );
           break;
         }
-        this.controle.religar(comando.ferramenta);
+        await this.controle.religar(comando.ferramenta);
         this.log({ type: "ferramenta_religada", ferramenta: comando.ferramenta });
         await this.envio.paraMim(`🔓 Ferramenta "${comando.ferramenta}" religada.`);
         break;

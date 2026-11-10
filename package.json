@@ -14,6 +14,9 @@
     "test:homologacao": "vitest run tests/homologacao",
     "evals": "tsx evals/runEvals.ts",
     "typecheck": "tsc --noEmit",
+    "db:migrate": "tsx scripts/dbMigrate.ts",
+    "fumaca:banco": "tsx scripts/fumacaBanco.ts",
+    "db:subir": "docker compose up -d banco",
     "check:api": "tsx scripts/checkApi.ts",
     "sync:pedidos": "tsx scripts/syncPedidos.ts",
     "test:orcamento": "tsx scripts/testCriarOrcamento.ts",
@@ -31,6 +34,7 @@
   "dependencies": {
     "dotenv": "^16.4.5",
     "openai": "7.23.0",
+    "pg": "^8.16.3",
     "qrcode-terminal": "0.12.0",
     "uuid": "^10.0.0",
     "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js#064a3d5a5a3dce1281a6a12740b5a7051339d154",
@@ -38,7 +42,9 @@
     "zod-to-json-schema": "^3.23.2"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.3.14",
     "@types/node": "^20.14.0",
+    "@types/pg": "^8.23.1",
     "@types/qrcode-terminal": "0.12.2",
     "@types/uuid": "^10.0.0",
     "tsx": "^4.15.7",

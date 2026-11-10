@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync } from "fs";
+import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { Ponte } from "../src/whatsapp/ponte.js";
-import { ArquivoModoLia, configLiaPadrao, iaAtende, telefoneDeTeste, validarConfigLia } from "../src/whatsapp/modoLia.js";
+import { MemoriaModoLia, configLiaPadrao, iaAtende, telefoneDeTeste, validarConfigLia } from "../src/whatsapp/modoLia.js";
 import { WhatsAppFalso } from "./helpers/whatsappFalso.js";
 import { AgenteFalso } from "./helpers/agenteFalso.js";
 
@@ -44,14 +44,11 @@ describe("modo da Lia", () => {
     expect(iaAtende({ modo: "desligada", numerosTeste: [TESTE], atualizadoEm: null }, TESTE)).toBe(false);
   });
 
-  it("sem arquivo, WHATSAPP_LIBERADOS vira modo teste; arquivo salvo prevalece", () => {
-    const arquivo = join(mkdtempSync(join(tmpdir(), "lia-")), "lia-modo.json");
-    const armazem = new ArquivoModoLia(arquivo, configLiaPadrao(["558399990000"]));
-    expect(armazem.ler()).toMatchObject({ modo: "teste", numerosTeste: [TESTE] });
-    armazem.salvar({ modo: "desligada", numerosTeste: [TESTE] });
-    expect(armazem.ler()).toMatchObject({ modo: "desligada", numerosTeste: [TESTE] });
-    writeFileSync(arquivo, "{quebrado");
-    expect(armazem.ler().modo).toBe("teste");
+  it("sem registro, WHATSAPP_LIBERADOS vira modo teste; o salvo prevalece", async () => {
+    const armazem = new MemoriaModoLia(configLiaPadrao(["558399990000"]));
+    expect(await armazem.ler()).toMatchObject({ modo: "teste", numerosTeste: [TESTE] });
+    await armazem.salvar({ modo: "desligada", numerosTeste: [TESTE] });
+    expect(await armazem.ler()).toMatchObject({ modo: "desligada", numerosTeste: [TESTE] });
     expect(configLiaPadrao([]).modo).toBe("ligada");
   });
 
