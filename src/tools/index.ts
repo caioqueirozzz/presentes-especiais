@@ -51,7 +51,7 @@ export const tools: ToolDefinition[] = [
   {
     name: "buscar_produtos",
     description:
-      "Recomenda até 3 produtos da loja a partir do que o cliente procura (palavras-chave, ocasião), da quantidade e do valor (por unidade ou total). Só devolve produtos que respeitam quantidade mínima, estoque e valor, com o preço exato do site na quantidade. O sistema envia ao cliente um cartão com foto e esse preço por produto; o retorno traz cartoes_enviados e total_se_o_cliente_perguntar. Não redigite o cartão. Use sempre que o cliente pedir recomendação ou sugestão. Nunca cite produto, preço ou estoque que não tenha vindo desta ferramenta ou de detalhar_produto.",
+      "Recomenda até 3 produtos da loja a partir do que o cliente procura (palavras-chave, ocasião), da quantidade e do valor (por unidade ou total). Quando o cliente nomear o produto, preencha tipo_produto com o tipo no singular (camiseta, caneca, caneta): a busca passa a trazer só produtos desse tipo, e responde nenhum_do_tipo quando a loja não tem nenhum. Só devolve produtos que respeitam quantidade mínima, estoque e valor, com o preço exato do site na quantidade. O sistema envia ao cliente um cartão com foto e esse preço por produto; o retorno traz cartoes_enviados e total_se_o_cliente_perguntar. Não redigite o cartão. Use sempre que o cliente pedir recomendação ou sugestão. Nunca cite produto, preço ou estoque que não tenha vindo desta ferramenta ou de detalhar_produto.",
     inputSchema: schemaDaFerramenta(buscarProdutosSchema),
     schema: buscarProdutosSchema,
     handler: buscarProdutosHandler as ToolDefinition["handler"],

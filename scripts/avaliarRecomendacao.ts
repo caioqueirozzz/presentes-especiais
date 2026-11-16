@@ -54,6 +54,13 @@ function argumento(nome: string): string | undefined {
 }
 
 async function main() {
+  // --comparar é outra medição: BM25 × semântica, sem revalidação na API (spec §8).
+  // Importar já roda o script; ele cuida do próprio código de saída.
+  if (process.argv.includes("--comparar")) {
+    await import("./compararBusca.js");
+    return;
+  }
+
   const arquivo = resolve(argumento("arquivo") ?? join(__dir, "../evals/recomendacao/pedidos.json"));
   const pedidos: PedidoJson[] = JSON.parse(readFileSync(arquivo, "utf-8")).pedidos;
 

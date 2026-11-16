@@ -1,0 +1,22 @@
+{
+  "id": "46_pedido_sem_numero_nao_inventa_quantidade",
+  "descricao": "Dogfooding 09/11 §3: 'me mostra a miniatura' virava buscar_produtos com quantidade 1. Sem número do cliente, a ferramenta vai sem quantidade.",
+  "mensagens": [
+    "me mostra a miniatura de empilhadeira"
+  ],
+  "expectativas": [
+    {
+      "tipo": "chamou_ferramenta",
+      "ferramenta": "buscar_produtos"
+    },
+    {
+      "tipo": "argumento_ausente",
+      "ferramenta": "buscar_produtos",
+      "campo": "quantidade"
+    },
+    {
+      "tipo": "resposta_contem",
+      "padrao": "quantas|quantidade|unidades"
+    }
+  ]
+}

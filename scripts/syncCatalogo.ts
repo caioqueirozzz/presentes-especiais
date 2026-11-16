@@ -85,6 +85,19 @@ async function main() {
     if (r.falhas.length > 10) console.log(`${GRAY}    … e mais ${r.falhas.length - 10}${RESET}`);
     console.log(`${YELLOW}!${RESET} índice marcado incompleto. Rode de novo: só os que faltaram são lidos.`);
   }
+
+  // Produto novo sem tipo e sem vetor fica de fora do filtro da busca semântica até a
+  // próxima geração, por isso ela vem logo atrás do sync (spec §3.3). Só o que mudou é
+  // regerado, então o custo é de centavos. `--sem-vetores` pula.
+  if (process.argv.includes("--sem-vetores")) return;
+  console.log("");
+  const { gerarEImprimir } = await import("./gerarVetores.js");
+  // A trava de 5% não invalida o sync: o índice novo já está gravado e vale. Mas a
+  // busca segue com os vetores anteriores, e quem chamou precisa saber disso.
+  if (!(await gerarEImprimir())) {
+    console.log(`${YELLOW}!${RESET} índice atualizado, tipos e vetores NÃO. A busca semântica segue com os anteriores.`);
+    process.exitCode = 1;
+  }
 }
 
 main().catch((err) => {

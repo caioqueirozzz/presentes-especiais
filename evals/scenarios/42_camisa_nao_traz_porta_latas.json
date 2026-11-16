@@ -1,0 +1,23 @@
+{
+  "id": "42_camisa_nao_traz_porta_latas",
+  "descricao": "Dogfooding 09/11: 'camisas dry fit' trazia o Porta Latas Camisa. Com tipo_produto, o top-3 só tem camiseta.",
+  "mensagens": [
+    "quero 10 camisas dry fit personalizadas"
+  ],
+  "expectativas": [
+    {
+      "tipo": "chamou_ferramenta",
+      "ferramenta": "buscar_produtos"
+    },
+    {
+      "tipo": "argumento_contem",
+      "ferramenta": "buscar_produtos",
+      "campo": "tipo_produto",
+      "padrao": "camis"
+    },
+    {
+      "tipo": "resposta_nao_contem",
+      "padrao": "porta.?lata"
+    }
+  ]
+}

@@ -8,12 +8,30 @@ import type { MotivoInelegivel } from "../catalogo/oferta.js";
 import { cotou, guardarCotacoes, type Cotacao } from "../catalogo/cotacao.js";
 import { montarCartao } from "./cartao.js";
 import { arredondar } from "../integrations/brindeme/mappers.js";
+import { MotorSemantico } from "../catalogo/semantica.js";
+import { arquivosVetoresPadrao, FileVectorStore } from "../catalogo/vetores.js";
+import { arquivoTiposPadrao, FileTipoStore } from "../catalogo/tipos.js";
+import { clienteEmbeddingsPadrao } from "../llm/embeddings.js";
+import { config } from "../config.js";
 
 export const buscarProdutosSchema = z.object({
   consulta: z
     .string()
     .describe("O que o cliente procura, em palavras-chave (produto, material, uso). Ex: 'caneca', 'algo para professores'"),
-  quantidade: z.number().int().positive().optional().describe("Quantidade desejada. Sem ela o preço é só 'a partir de'"),
+  tipo_produto: z
+    .string()
+    .optional()
+    .describe(
+      "O tipo de produto que o cliente nomeou, no singular (camiseta, caneca, caneta). Omita se ele não nomeou um tipo (ex.: 'algo para professores')."
+    ),
+  quantidade: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "Quantidade desejada. Sem ela o preço é só 'a partir de'. Omita se o cliente não disse um número. Nunca use 1 por padrão."
+    ),
   preco_max_unitario: z.number().positive().optional().describe("Preço máximo por unidade, em reais"),
   orcamento_total: z
     .number()
@@ -28,12 +46,19 @@ export type BuscarProdutosInput = z.infer<typeof buscarProdutosSchema>;
 /** Injetáveis para teste; em produção lêem o índice sincronizado e a tabela da loja. */
 let indexPadrao: ProductIndexStore | null = null;
 let tagsPadrao: OccasionTagStore | null = null;
+let semanticaPadrao: MotorSemantico | null = null;
+let semanticaMontada = false;
 
 export function setProductIndexStore(store: ProductIndexStore | null): void {
   indexPadrao = store;
 }
 export function setOccasionTagStore(store: OccasionTagStore | null): void {
   tagsPadrao = store;
+}
+/** `null` desliga a busca semântica e devolve o BM25 (usado pelos testes e pelo modo de reserva). */
+export function setMotorSemantico(motor: MotorSemantico | null): void {
+  semanticaPadrao = motor;
+  semanticaMontada = true;
 }
 function getIndex(): ProductIndexStore {
   if (!indexPadrao) indexPadrao = new FileProductIndexStore();
@@ -42,6 +67,28 @@ function getIndex(): ProductIndexStore {
 function getTags(): OccasionTagStore {
   if (!tagsPadrao) tagsPadrao = new FileOccasionTagStore();
   return tagsPadrao;
+}
+
+/**
+ * O motor é montado uma vez por processo. Sem OPENAI_API_KEY ele nem existe: a
+ * busca segue lexical, como antes da busca semântica.
+ */
+function getSemantica(): MotorSemantico | undefined {
+  if (!semanticaMontada) {
+    semanticaMontada = true;
+    if (config.openaiApiKey) {
+      const modo = config.brindeMe.mode === "http" ? "http" : "mock";
+      const prod = arquivosVetoresPadrao("produto", modo);
+      const tipo = arquivosVetoresPadrao("tipo", modo);
+      semanticaPadrao = new MotorSemantico({
+        vetoresProduto: new FileVectorStore(prod.bin, prod.meta),
+        vetoresTipo: new FileVectorStore(tipo.bin, tipo.meta),
+        tipos: new FileTipoStore(arquivoTiposPadrao(modo)),
+        embeddings: clienteEmbeddingsPadrao(config.openaiApiKey),
+      });
+    }
+  }
+  return semanticaPadrao ?? undefined;
 }
 
 export const OBSERVACAO_PRECOS =
@@ -118,6 +165,19 @@ function formatar(r: Recomendacao, input: BuscarProdutosInput, state: Conversati
 
     case "falha_api":
       return { erro: r.erro };
+
+    // O cliente nomeou um tipo e o catálogo não tem nenhum produto dele. Sem cartões
+    // e sem vizinho de outro tipo: mostrar um foi o erro que o dogfooding pegou, e sem
+    // cartão a frase fixa do turno não entra (runTurn), então o modelo pode explicar.
+    case "nenhum_do_tipo":
+      return {
+        resultado: "nenhum_do_tipo",
+        tipo_pedido: r.tipoPedido,
+        razao: `O catálogo não tem nenhum produto do tipo "${r.tipoPedido}".`,
+        ajustes_sugeridos: [] as Ajuste[],
+        instrucao_ao_agente:
+          "Diga em UMA frase que a loja não trabalha com esse tipo de produto e ofereça falar com um atendente (transferir_humano com motivo outro, se ele aceitar). Não sugira produto de outro tipo, não invente substituto e não chame buscar_produtos de novo com as mesmas palavras.",
+      };
 
     case "nenhum": {
       if (r.motivo === "sem_correspondencia") {
@@ -241,12 +301,13 @@ export async function buscarProdutosHandler(
   const recomendacao = await recomendar(
     {
       consulta: input.consulta,
+      tipoProduto: input.tipo_produto,
       quantidade: input.quantidade,
       precoMaxUnitario: input.preco_max_unitario,
       orcamentoTotal: input.orcamento_total,
       ocasiao: input.ocasiao,
     },
-    { index: getIndex(), tags: getTags(), client }
+    { index: getIndex(), tags: getTags(), client, semantica: getSemantica() }
   );
 
   return formatar(recomendacao, input, state);

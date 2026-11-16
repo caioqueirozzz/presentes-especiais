@@ -30,7 +30,10 @@ interface Expectativa {
     | "resposta_nao_contem"
     | "texto_nao_contem"
     | "campo_nao_vazou"
-    | "max_transferencias";
+    | "max_transferencias"
+    // Busca semântica: não basta a ferramenta ter sido chamada, importa COM O QUÊ.
+    | "argumento_contem"
+    | "argumento_ausente";
   ferramenta?: string;
   ordem?: string[];
   motivo?: string;
@@ -170,6 +173,27 @@ async function runScenario(scenario: Scenario): Promise<{ passed: number; failed
     }
   }
 
+  /**
+   * Argumentos das chamadas de uma ferramenta. `inputSummary` é o JSON cortado em
+   * 120 caracteres: quando o corte estraga o JSON, o objeto vem vazio, e aí a
+   * expectativa falha em vez de passar por engano.
+   */
+  function argumentosDe(
+    detalhes: Array<{ name: string; inputSummary: string }>,
+    ferramenta: string
+  ): Array<Record<string, unknown>> {
+    return detalhes
+      .filter((d) => d.name === ferramenta)
+      .map((d) => {
+        try {
+          const lido: unknown = JSON.parse(d.inputSummary);
+          return typeof lido === "object" && lido !== null ? (lido as Record<string, unknown>) : {};
+        } catch {
+          return {};
+        }
+      });
+  }
+
   const results: { passed: boolean; msg: string }[] = [];
 
   for (const exp of scenario.expectativas) {
@@ -235,6 +259,32 @@ async function runScenario(scenario: Scenario): Promise<{ passed: number; failed
           msg: `max_transferencias: ${exp.max} (feitas: ${transferencias})`,
         });
         break;
+
+      // As duas abaixo olham o ARGUMENTO da chamada. "Chamou buscar_produtos" não
+      // diz nada sobre o pedido sem número ter virado quantidade: 1 inventada.
+      case "argumento_contem": {
+        const chamadas = argumentosDe(allToolCallDetails, exp.ferramenta!);
+        const re = new RegExp(exp.padrao!, "i");
+        const achou = chamadas.some((a) => {
+          const v = a[exp.campo!];
+          return v !== undefined && re.test(String(v));
+        });
+        results.push({
+          passed: achou,
+          msg: `argumento_contem: ${exp.ferramenta}.${exp.campo} ~ /${exp.padrao}/ (chamadas: ${JSON.stringify(chamadas)})`,
+        });
+        break;
+      }
+
+      case "argumento_ausente": {
+        const chamadas = argumentosDe(allToolCallDetails, exp.ferramenta!);
+        const semCampo = chamadas.length > 0 && chamadas.every((a) => a[exp.campo!] === undefined);
+        results.push({
+          passed: semCampo,
+          msg: `argumento_ausente: ${exp.ferramenta} sem ${exp.campo} (chamadas: ${JSON.stringify(chamadas)})`,
+        });
+        break;
+      }
     }
   }
 

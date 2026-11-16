@@ -36,6 +36,8 @@ import {
   radicaisDasOcasioes,
   type OccasionTagStore,
 } from "./ocasioes.js";
+import { pontuarCatalogo, type MotorSemantico } from "./semantica.js";
+import { logarBuscaDegradada } from "./logBusca.js";
 
 /** Quantas opções o agente apresenta (Fase 1: no máximo 3 por vez). */
 export const MAX_OPCOES = 3;
@@ -58,6 +60,8 @@ export interface PedidoRecomendacao {
   precoMaxUnitario?: number;
   orcamentoTotal?: number;
   ocasiao?: string;
+  /** Tipo que o cliente nomeou ("camiseta", "caneca"). Com ele, só produtos desse tipo são candidatos. */
+  tipoProduto?: string;
 }
 
 export interface Dependencias {
@@ -65,6 +69,8 @@ export interface Dependencias {
   tags: OccasionTagStore;
   client: BrindeMeClient;
   agora?: () => Date;
+  /** Ausente, ou sem vetores gravados: a busca roda no BM25 de sempre. */
+  semantica?: MotorSemantico;
 }
 
 export interface ItemRecomendado {
@@ -136,6 +142,12 @@ export type Recomendacao =
       ocasioes: string[];
       descartadosNaRevalidacao: number;
     }
+  /**
+   * O cliente nomeou um tipo e o catálogo não tem NENHUM produto desse tipo.
+   * Separado de "nenhum" de propósito: aqui não há vizinho de outro tipo para
+   * oferecer, e mostrar um seria repetir o erro que o dogfooding pegou.
+   */
+  | { tipo: "nenhum_do_tipo"; tipoPedido: string; ocasioes: string[] }
   | { tipo: "falha_api"; erro: FalhaApi }
   | { tipo: "indice_vazio" };
 
@@ -212,27 +224,17 @@ interface Candidato {
   ocasiaoConfere: boolean;
 }
 
-function orcamentoDe(p: PedidoRecomendacao): Orcamento {
-  // Total sem quantidade não vira teto unitário: cada produto seria avaliado na
-  // sua própria quantidade mínima e o "total" perderia o sentido.
-  return {
-    unitarioMax: p.precoMaxUnitario,
-    totalMax: p.quantidade !== undefined ? p.orcamentoTotal : undefined,
-  };
-}
-
-export async function recomendar(
-  pedido: PedidoRecomendacao,
+/**
+ * Candidatos pelo BM25 — o caminho de sempre, que agora é a RESERVA.
+ *
+ * Continua valendo quando não há motor semântico, quando os vetores não foram
+ * gerados, quando a OpenAI falha e para o produto que ainda não tem vetor.
+ */
+function candidatosLexicais(
+  produtos: ProdutoIndexado[],
+  consulta: ConsultaInterpretada,
   deps: Dependencias
-): Promise<Recomendacao> {
-  const agora = deps.agora ?? (() => new Date());
-  const { produtos } = deps.index.carregar();
-  if (produtos.length === 0) return { tipo: "indice_vazio" };
-
-  const consulta = interpretar(pedido.consulta, pedido.ocasiao);
-  const orcamento = orcamentoDe(pedido);
-
-  // --- candidatos por relevância -------------------------------------------------
+): Candidato[] {
   const pontuacoes: Map<string, PontuacaoDocumento> = consulta.termos.length
     ? motorDe(produtos).pontuar(consulta.termos)
     : new Map();
@@ -262,6 +264,98 @@ export async function recomendar(
       ocasiaoConfere,
     });
   }
+  return candidatos;
+}
+
+/**
+ * Candidatos pelo motor semântico. `null` quer dizer "não deu, use o BM25" —
+ * e nesse caso a degradação já foi logada por quem a detectou.
+ *
+ * `nenhumDoTipo` é diferente de lista vazia: significa que o filtro por tipo
+ * rodou e não sobrou nada. Aí não existe segunda opção honesta para oferecer.
+ */
+async function candidatosSemanticos(
+  produtos: ProdutoIndexado[],
+  pedido: PedidoRecomendacao,
+  consulta: ConsultaInterpretada,
+  deps: Dependencias
+): Promise<{ candidatos: Candidato[]; nenhumDoTipo: boolean } | null> {
+  const motor = deps.semantica;
+  if (!motor) return null;
+
+  const retrato = await motor.retrato();
+  if (!retrato) return null;
+
+  const vetorConsulta = await motor.embedding(pedido.consulta);
+  if (!vetorConsulta) return null;
+
+  const tipoPedido = (pedido.tipoProduto ?? "").trim();
+  let vetorTipo: Float32Array | null = null;
+  if (tipoPedido) {
+    if (!retrato.vetoresTipo) {
+      // Sem os vetores de tipo não há filtro; melhor o BM25 do que fingir que filtrou.
+      logarBuscaDegradada({ motivo: "sem_vetores_de_tipo", tipo_pedido: tipoPedido });
+      return null;
+    }
+    vetorTipo = await motor.embedding(tipoPedido);
+    if (!vetorTipo) return null;
+  }
+
+  const pontuacoes = pontuarCatalogo(
+    produtos.map((p) => p.id),
+    retrato,
+    vetorConsulta,
+    vetorTipo,
+    motor.piso,
+    motor.margem
+  );
+
+  // Com tipo pedido e nada acima do piso: o catálogo não tem esse tipo de produto.
+  if (tipoPedido && pontuacoes.size === 0) return { candidatos: [], nenhumDoTipo: true };
+
+  const candidatos: Candidato[] = [];
+  for (const p of produtos) {
+    const nota = pontuacoes.get(p.id);
+    if (!nota) continue;
+    candidatos.push({
+      produto: p,
+      similaridade: nota.similaridade,
+      ocasiaoConfere: consulta.ocasioes.length > 0 && etiquetadoCom(p, consulta.ocasioes, deps.tags),
+    });
+  }
+  return { candidatos, nenhumDoTipo: false };
+}
+
+function orcamentoDe(p: PedidoRecomendacao): Orcamento {
+  // Total sem quantidade não vira teto unitário: cada produto seria avaliado na
+  // sua própria quantidade mínima e o "total" perderia o sentido.
+  return {
+    unitarioMax: p.precoMaxUnitario,
+    totalMax: p.quantidade !== undefined ? p.orcamentoTotal : undefined,
+  };
+}
+
+export async function recomendar(
+  pedido: PedidoRecomendacao,
+  deps: Dependencias
+): Promise<Recomendacao> {
+  const agora = deps.agora ?? (() => new Date());
+  const { produtos } = deps.index.carregar();
+  if (produtos.length === 0) return { tipo: "indice_vazio" };
+
+  const consulta = interpretar(pedido.consulta, pedido.ocasiao);
+  const orcamento = orcamentoDe(pedido);
+
+  // --- candidatos por relevância -------------------------------------------------
+  const semantico = await candidatosSemanticos(produtos, pedido, consulta, deps);
+
+  if (semantico?.nenhumDoTipo) {
+    return { tipo: "nenhum_do_tipo", tipoPedido: pedido.tipoProduto ?? "", ocasioes: consulta.ocasioes };
+  }
+
+  const candidatos: Candidato[] = semantico
+    ? semantico.candidatos
+    : candidatosLexicais(produtos, consulta, deps);
 
   if (candidatos.length === 0) {
     return {
