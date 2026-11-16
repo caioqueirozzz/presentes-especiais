@@ -78,11 +78,15 @@ describe("buscar_produtos (ferramenta)", () => {
     expect(r.produtos[0].subprodutos).toEqual([{ subproduto_id: "pt-1" }]);
   });
 
-  it("sem quantidade: nenhum preço chega ao modelo, só o mínimo, e manda perguntar (eval 17)", async () => {
+  it("sem quantidade: preço do pedido mínimo, nenhum total, e manda perguntar (eval 17)", async () => {
     const r = await buscar({ consulta: "caneca" });
-    expect(r.aviso).toMatch(/pergunte a quantidade/i);
+    expect(r.aviso).toMatch(/pergunte quantas unidades/i);
     expect(r.produtos[0]).toMatchObject({ nome: "Caneca de Porcelana", min_quantity: 25 });
-    expect(JSON.stringify(r.produtos)).not.toMatch(/preco|total_estimado|18\.9/);
+    // Spec §4.4: o preço do pedido mínimo passa a ir. Sem nenhum preço, o modelo
+    // preenchia o vazio com valor inventado ou "a confirmar" (dogfooding de 09/11).
+    expect(r.produtos[0].preco_unitario_no_pedido_minimo).toBe(18.9);
+    // O total continua fora: o cliente ainda não disse quantas unidades quer.
+    expect(JSON.stringify(r.produtos)).not.toMatch(/total_estimado|preco_unitario_na_quantidade/);
   });
 
   it("não expõe estoque nem dado interno ao modelo; o id da cor só aparece em subprodutos", async () => {
@@ -167,7 +171,7 @@ describe("buscar_produtos (ferramenta)", () => {
       expect(r.motivo).toBe("regras_nao_fecham");
       expect(r.razao).toMatch(/pedido mínimo/);
       expect(r.ajustes_sugeridos).toEqual([
-        { tipo: "aumentar_quantidade", produto_id: "squeeze", nome: "Squeeze de Alumínio", quantidade: 50, preco_unitario: 12, total_estimado: 600, cor: "Azul" },
+        { tipo: "aumentar_quantidade", produto_id: "squeeze", nome: "Squeeze de Alumínio", quantidade: 50, preco_unitario: 12, total_estimado: 600, cor: "Azul", subproduto_id: "s-az" },
       ]);
       expect(r.instrucao_ao_agente).toMatch(/Não cite produto/);
     });

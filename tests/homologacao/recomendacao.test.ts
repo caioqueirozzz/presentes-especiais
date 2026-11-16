@@ -161,15 +161,25 @@ describe("H2 — precisão de preço, mínimo e estoque em todo o catálogo", ()
     expect(r).toMatchObject({ resultado: "faltam_dados", faltando: ["quantidade"] });
   });
 
-  it("H2.9 sem quantidade, a busca não passa preço nenhum (preço muda por faixa)", async () => {
+  it("H2.9 sem quantidade, só o preço do pedido mínimo, nunca um total (spec §4.4)", async () => {
     const r = (await buscarProdutosHandler({ consulta: "caneca" }, state, client)) as {
       aviso?: string;
       produtos: Array<Record<string, unknown>>;
+      cartoes: Array<{ legenda: string }>;
     };
-    expect(r.aviso).toMatch(/não passe valor/);
+    expect(r.aviso).toMatch(/não cite nem recalcule valor/i);
+    expect(r.aviso).toMatch(/pergunte quantas unidades/i);
     for (const p of r.produtos) {
+      // O preço do mínimo pode ir: é um preço real, de uma quantidade real. O da
+      // quantidade do cliente e o total, não — ele ainda não disse quantas quer.
       expect(p).not.toHaveProperty("preco_unitario_na_quantidade");
       expect(p).not.toHaveProperty("total_estimado");
+      expect(p).toHaveProperty("preco_unitario_no_pedido_minimo");
+    }
+    // E o cartão tem de dizer de qual quantidade o preço é, senão o cliente lê
+    // como se fosse o preço do pedido dele.
+    for (const c of r.cartoes) {
+      if (/\/un/.test(c.legenda)) expect(c.legenda).toMatch(/pedido mínimo de \d+ un\./i);
     }
   });
 

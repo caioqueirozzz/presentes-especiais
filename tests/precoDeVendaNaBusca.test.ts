@@ -85,11 +85,14 @@ describe("busca com o preço exato do site", () => {
     expect(index.carregar().produtos[0].subprodutos[0].faixas).toEqual([{ min: 1, max: 9999, preco: 11 }]);
   });
 
-  it("sem quantidade: nenhuma cotação, cartão só com nome e cores", async () => {
+  it("sem quantidade: cota no pedido mínimo e o cartão diz que o preço é dele (spec §4.4)", async () => {
     const { client } = montar([azul()]);
     const r = (await buscarProdutosHandler({ consulta: "caneca" }, createInitialState("5583999990000"), client)) as { cartoes: Array<{ legenda: string }> };
-    expect(client.consultasDePreco).toEqual([]);
-    expect(r.cartoes[0].legenda).toBe("*Caneca Azul*\nCores: Azul");
+    // Antes não havia cotação nenhuma e o cartão saía sem preço; aí o modelo
+    // preenchia o vazio com valor inventado ou "a confirmar" (dogfooding de 09/11).
+    expect(client.consultasDePreco.length).toBeGreaterThan(0);
+    expect(r.cartoes[0].legenda).toContain("*Caneca Azul*");
+    expect(r.cartoes[0].legenda).toContain("no pedido mínimo de");
   });
 
   it("todos os resultados sem estoque: diz que não tem no estoque e oferece o humano", async () => {
@@ -119,6 +122,6 @@ describe("busca com o preço exato do site", () => {
     const r = await recomendar({ consulta: "caderno", quantidade: 10 }, deps);
     expect(r.tipo).toBe("nenhum");
     if (r.tipo !== "nenhum") return;
-    expect(r.ajustes).toEqual([{ tipo: "aumentar_quantidade", produto_id: "cad", nome: "Caderno", quantidade: 50, preco_unitario: 21, total_estimado: 1050, cor: "Azul" }]);
+    expect(r.ajustes).toEqual([{ tipo: "aumentar_quantidade", produto_id: "cad", nome: "Caderno", quantidade: 50, preco_unitario: 21, total_estimado: 1050, cor: "Azul", subproduto_id: "d1" }]);
   });
 });

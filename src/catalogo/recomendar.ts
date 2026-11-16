@@ -107,6 +107,12 @@ export type Ajuste = (
 ) & {
   /** Cor que o preço cota (a mais barata pelo índice): sem ela o modelo falaria o valor de uma cor como se fosse de todas. */
   cor?: string;
+  /**
+   * Id do subproduto dessa cor. É o que deixa o produto do ajuste entrar em
+   * `ultimasOpcoes`: sem ele, o "quero 200 dessa" do dogfooding virava busca
+   * nova e trazia outro produto, porque o id do ajuste não existia no estado.
+   */
+  subproduto_id?: string;
 };
 
 export type Recomendacao =
@@ -348,8 +354,12 @@ export async function recomendar(
       }
       let cotacoes: ResultadoCotacao[] = [];
       let cores = oferta.cores;
-      if (pedido.quantidade !== undefined) {
-        const q = pedido.quantidade;
+      {
+        // Sem quantidade, cota no pedido MÍNIMO do próprio produto (oferta.quantidade):
+        // antes o cartão saía sem preço nenhum e o modelo preenchia o vazio com valor
+        // inventado ou com "a confirmar" (dogfooding de 09/11). Com o preço do mínimo,
+        // ele tem o que dizer e ainda precisa perguntar a quantidade.
+        const q = oferta.quantidade;
         const cotadas = oferta.cores.slice(0, MAX_CORES_COTADAS);
         cotacoes = await cotarAoVivo(
           deps.client,
@@ -501,14 +511,15 @@ async function precificarAjustes(
 ): Promise<Ajuste[]> {
   if (lista.length === 0) return [];
   const cotacoes = await cotarAoVivo(client, lista.map(({ ajuste, subprodutoId }) => ({ subprodutoId, quantidade: ajuste.quantidade })), agora);
-  return lista.map(({ ajuste, cor }, i) => {
+  return lista.map(({ ajuste, cor, subprodutoId }, i) => {
     const c = cotacoes[i];
     const exato = cotou(c) && c.centavos > 0 ? c.centavos : null;
     const preco = exato === null ? undefined : exato / 100;
     const total = exato === null ? undefined : arredondar((exato * ajuste.quantidade) / 100);
+    const comum = { cor: cor || undefined, subproduto_id: subprodutoId || undefined };
     return ajuste.tipo === "aumentar_orcamento"
-      ? { ...ajuste, preco_unitario_minimo: preco, total_estimado: total, cor: cor || undefined }
-      : { ...ajuste, preco_unitario: preco, total_estimado: total, cor: cor || undefined };
+      ? { ...ajuste, preco_unitario_minimo: preco, total_estimado: total, ...comum }
+      : { ...ajuste, preco_unitario: preco, total_estimado: total, ...comum };
   });
 }
 
