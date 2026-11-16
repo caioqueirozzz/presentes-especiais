@@ -127,6 +127,29 @@ Os evals rodam com o modelo real e vetores reais do mock (gerar com `gerar:vetor
 - Arquivo novo `evals/recomendacao/consultas-semantica.json`: as 30 de `evals/recomendacao/pedidos.json` + 10 do dogfooding (camisa dry fit, caneca mágica, miniatura de empilhadeira, caixa de som com microfone, caneta plástica e outras 5 com palavra ambígua).
 - `scripts/avaliarRecomendacao.ts` ganha o modo `--comparar`: para cada consulta, contra o índice real (`BRINDEME_MODE=http`), o top-3 do BM25 e o top-3 da semântica lado a lado, com nome, `tipo`, slug e o link `https://presentesespeciais.com.br/brinde/<slug>`. Saída em Markdown (`../Validações/busca-semantica-comparacao.md`, fora do repo, como os relatórios de eval), com uma coluna para o João marcar certo/errado.
 - O piso de tipo é calibrado nessa rodada: o menor valor que zera os casos do dogfooding sem tirar o produto certo de nenhuma das 40. Valor e motivo entram nesta spec.
+
+### Calibração (16/11/2026, Gui)
+
+**Piso 0,60 e margem 0,20** (`PISO_TIPO_PADRAO` e `MARGEM_TIPO_PADRAO`, `src/catalogo/semantica.ts`). Resultado na medição: **7 armadilhas no top-3 do BM25 → 0 na semântica**, e nenhum produto existente perdido.
+
+Um piso sozinho, como esta spec previa, não resolve. Os cossenos medidos:
+
+| Consulta | Tipo | Cosseno | |
+|---|---|---|---|
+| "camiseta" | camiseta | 1,000 | tipo certo |
+| "miniatura de empilhadeira" | miniatura de empilhadeira | 1,000 | tipo certo |
+| "miniatura de empilhadeira" | miniatura de carro | 0,717 | **outro tipo, passaria** |
+| "guarda-chuva" (a loja não tem) | chaveiro | 0,379 | ruído |
+| "ecobag" | caneca | 0,371 | ruído |
+
+O tipo certo dá ~1,000 e abaixo de ~0,45 é ruído — e no ruído o tipo **errado** chega a pontuar mais que o certo. Daí os dois números:
+
+- **piso 0,60**: acima da faixa de ruído com folga, para quem pede um tipo que a loja não tem cair em `nenhum_do_tipo` em vez de receber qualquer coisa;
+- **margem 0,20**: o melhor tipo da rodada vira a régua. Com a empilhadeira em 1,000 o corte sobe a 0,80 e o carro (0,717) cai. Subir o piso a 0,75 resolveria este caso e quebraria os pedidos escritos de outro jeito, que pontuam entre 0,80 e 0,95.
+
+**Achado extra:** a Ecobag estava rotulada como `sacola` e sumia da busca por "ecobag" — nenhum limiar separa 0,353 (certo) de 0,379 (errado). Não é problema de filtro, e sim de rótulo: o rotulador passou a exigir a palavra do próprio nome do produto ("Ecobag Personalizada" → `ecobag`, "Squeeze de Alumínio" → `squeeze`). Se escapar de novo, `tipos-corrigidos.json` resolve sem deploy.
+
+**Pendente:** estes números vêm do catálogo de mock (13 produtos). A rodada contra os ~6,5 mil produtos reais precisa de `npm run sync:catalogo` completo (~3h no limite de 30 req/min) e depois `npm run avaliar:recomendacao -- --comparar --varrer`. O desenho não deve mudar; o piso pode.
 - O João revisa no Claude Desktop, abrindo as páginas.
 
 ## 9. Fronteira com a Fase 1 (Neon)
