@@ -57,6 +57,14 @@ describe("encaminharParaDesign", () => {
     expect(recebido.corpo).toContain("referencia_uniforme");
     expect(recebido.corpo.match(/name="imagem"/g)).toHaveLength(2);
   });
+  it("com mais de 10 arquivos na conversa, manda só os 10 mais recentes", async () => {
+    const muitos = Array.from({ length: 12 }, (_, i) => ({ ...arquivos[0], nome: `f${i + 1}.png` }));
+    const r = await encaminharParaDesign({ telefone: "5511900000001", origem: "LIA", arquivos: muitos });
+    expect(r.imagens).toBe(10);
+    expect(recebido.corpo).not.toContain('filename="f2.png"');
+    expect(recebido.corpo).toContain('filename="f3.png"');
+    expect(recebido.corpo).toContain('filename="f12.png"');
+  });
   it("arquivo que sumiu do disco é pulado", async () => {
     const r = await encaminharParaDesign({
       telefone: "5511900000001",

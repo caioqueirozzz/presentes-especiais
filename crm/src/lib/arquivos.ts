@@ -25,9 +25,12 @@ export function detectarTipo(bytes: Uint8Array): TipoArquivo | null {
   if (at(0, 0x89, 0x50, 0x4e, 0x47)) return "png";
   if (at(0, 0xff, 0xd8, 0xff)) return "jpeg";
   if (ascii(0, "RIFF") && ascii(8, "WEBP")) return "webp";
-  if (ascii(0, "%PDF")) return "pdf";
-  const inicio = new TextDecoder().decode(bytes.subarray(0, 1024)).replace(/^﻿/, "").trimStart();
-  return inicio.replace(/^<\?xml[^>]*\?>\s*/, "").startsWith("<svg") ? "svg" : null;
+  const inicio = new TextDecoder().decode(bytes.subarray(0, 4096)).replace(/^﻿/, "");
+  // Alguns geradores põem bytes antes do cabeçalho do PDF; o leitor aceita %PDF no primeiro KB
+  if (inicio.slice(0, 1024).includes("%PDF-")) return "pdf";
+  // SVG exportado por Illustrator/Inkscape/Corel: declaração XML, comentários e DOCTYPE antes do <svg>
+  const semProlog = inicio.replace(/^(\s+|<\?xml[^>]*\?>|<!--[\s\S]*?-->|<!DOCTYPE[^>]*>)+/i, "");
+  return semProlog.startsWith("<svg") ? "svg" : null;
 }
 
 export const ehAnalisavel = (t: TipoArquivo) => t === "png" || t === "jpeg" || t === "webp";

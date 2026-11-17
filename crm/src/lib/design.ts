@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { one, query, transaction } from "@/lib/db";
 import type { Role } from "@/lib/types";
 import type { Executor } from "@/lib/db";
@@ -46,22 +46,25 @@ export async function registrarEvento(tx: Executor, jobId: string, atorId: strin
   await tx.query("INSERT INTO design_events (job_id, actor_id, tipo, dados) VALUES ($1, $2, $3, $4)", [jobId, atorId, tipo, JSON.stringify(dados)]);
 }
 
-type ImagemValida = { bytes: Buffer; nome: string; tipo: TipoArquivo };
+type ImagemValida = { bytes: Buffer; nome: string; tipo: TipoArquivo; sha256: string };
 
-function validarImagens(imagens: { bytes: Buffer; nome: string }[]): ImagemValida[] {
-  return imagens.map((i) => {
-    if (i.bytes.length === 0 || i.bytes.length > LIMITE_BYTES) throw new DesignError(`Arquivo ${i.nome}: vazio ou maior que 16 MB.`, 400);
-    const tipo = detectarTipo(i.bytes);
-    if (!tipo) throw new DesignError(`Arquivo ${i.nome}: tipo não aceito (PNG, JPEG, WEBP, PDF ou SVG).`, 400);
-    return { ...i, tipo };
-  });
+/** Arquivo vazio, grande demais ou de tipo não aceito é pulado (e registrado): um arquivo ruim não derruba o lote. */
+function validarImagens(imagens: { bytes: Buffer; nome: string }[]): { validas: ImagemValida[]; ignorados: string[] } {
+  const validas: ImagemValida[] = [];
+  const ignorados: string[] = [];
+  for (const i of imagens) {
+    const tipo = i.bytes.length > 0 && i.bytes.length <= LIMITE_BYTES ? detectarTipo(i.bytes) : null;
+    if (tipo) validas.push({ ...i, tipo, sha256: createHash("sha256").update(i.bytes).digest("hex") });
+    else ignorados.push(i.nome);
+  }
+  return { validas, ignorados };
 }
 
 export async function salvarAsset(
   tx: Executor,
   jobId: string,
   tipoAsset: string,
-  img: { bytes: Buffer; nome?: string; tipo: TipoArquivo },
+  img: { bytes: Buffer; nome?: string; tipo: TipoArquivo; sha256?: string },
   versao = 1
 ): Promise<string> {
   const chave = `design/${jobId}/${tipoAsset.toLowerCase().replace("_", "-")}-${randomUUID()}.${EXTENSAO[img.tipo]}`;
@@ -73,7 +76,7 @@ export async function salvarAsset(
     chave,
     MIME[img.tipo],
     img.bytes.length,
-    JSON.stringify(img.nome ? { nome: img.nome } : {}),
+    JSON.stringify({ ...(img.nome ? { nome: img.nome } : {}), ...(img.sha256 ? { sha256: img.sha256 } : {}) }),
     versao,
   ]);
   return chave;
@@ -91,9 +94,8 @@ export async function abrirOuAnexar(p: {
   observacao?: string;
   prioridade?: "normal" | "alta";
   imagens: { bytes: Buffer; nome: string }[];
-}): Promise<{ jobId: string; criado: boolean }> {
-  const imagens = validarImagens(p.imagens);
-  const analisavel = imagens.some((i) => ehAnalisavel(i.tipo));
+}): Promise<{ jobId: string; criado: boolean; ignorados?: string[] }> {
+  const { validas, ignorados } = validarImagens(p.imagens);
   const ator = p.requestedBy ?? null;
 
   const tentar = () =>
@@ -115,10 +117,19 @@ export async function abrirOuAnexar(p: {
         await tx.query("UPDATE design_jobs SET order_id = COALESCE(order_id, $2) WHERE id = $1", [job.id, p.orderId]);
       }
 
+      // O agente reenvia todos os arquivos da conversa: o que o job já tem (mesmo conteúdo) não entra de novo
+      const jaTem = new Set(
+        (await tx.query<{ sha256: string | null }>("SELECT meta->>'sha256' AS sha256 FROM design_assets WHERE job_id = $1 AND tipo = 'ORIGINAL'", [job.id])).map(
+          (r) => r.sha256
+        )
+      );
+      const imagens = validas.filter((img) => !jaTem.has(img.sha256) && jaTem.add(img.sha256));
+      const analisavel = imagens.some((i) => ehAnalisavel(i.tipo));
       for (const img of imagens) {
         await salvarAsset(tx, job.id, "ORIGINAL", img);
         await registrarEvento(tx, job.id, ator, "imagem_anexada", { nome: img.nome, tipo: img.tipo });
       }
+      for (const nome of ignorados) await registrarEvento(tx, job.id, ator, "arquivo_ignorado", { nome: nome.slice(0, 200) });
       const nota = [p.motivo, p.observacao].filter(Boolean).join(": ");
       if (nota) {
         await tx.query("UPDATE design_jobs SET briefing = CASE WHEN briefing IS NULL THEN $2 ELSE briefing || chr(10) || $2 END WHERE id = $1", [
@@ -144,7 +155,7 @@ export async function abrirOuAnexar(p: {
       } else if (imagens.length && job.designer_id) {
         await notify(tx, job.designer_id, "Cliente mandou imagem nova", "Chegou arquivo novo num job seu.", `/app/design/${job.id}`);
       }
-      return { jobId: job.id, criado };
+      return { jobId: job.id, criado, ...(ignorados.length ? { ignorados } : {}) };
     });
 
   try {
@@ -301,17 +312,26 @@ export async function pedirConfirmacao(jobId: string, atorId: string): Promise<v
   });
 }
 
-/** Chamada a cada mensagem do cliente. Só o "APROVO" com confirmação pendente aprova. */
+/**
+ * Chamada a cada mensagem do cliente. Só o "APROVO" com confirmação pendente aprova. mensagemId é o id do
+ * WhatsApp: vai na devolução para a ponte não entregar esse mesmo "APROVO" à Lia.
+ */
 export async function receberRespostaDoCliente(
   leadId: string,
-  texto: string
+  texto: string,
+  mensagemId?: string,
+  enviadaEm?: string
 ): Promise<"aprovado" | "nao_confirmou" | "sem_confirmacao_pendente"> {
   const r = await transaction(async (tx) => {
     const [j] = await tx.query<{ id: string; designer_id: string | null; order_id: string | null; confirmacao_versao: number; assigned_to: string | null }>(
       `SELECT j.id, j.designer_id, j.order_id, j.confirmacao_versao, l.assigned_to
        FROM design_jobs j JOIN leads l ON l.id = j.lead_id
-       WHERE j.lead_id = $1 AND j.stage = 'AGUARDANDO_CLIENTE' AND j.confirmacao_pedida_em IS NOT NULL FOR UPDATE OF j`,
-      [leadId]
+       WHERE j.lead_id = $1 AND j.stage = 'AGUARDANDO_CLIENTE' AND j.confirmacao_pedida_em IS NOT NULL
+         -- Mensagem escrita antes do pedido de confirmação (entregue com atraso) não responde a ele;
+         -- 30 s de folga para a diferença entre o relógio do WhatsApp e o do servidor
+         AND ($2::timestamptz IS NULL OR $2::timestamptz >= j.confirmacao_pedida_em - interval '30 seconds')
+       FOR UPDATE OF j`,
+      [leadId, enviadaEm ?? null]
     );
     if (!j) return { resultado: "sem_confirmacao_pendente" as const, jobId: null };
     const aprovou = ehAprovacao(texto);
@@ -331,7 +351,8 @@ export async function receberRespostaDoCliente(
     await registrarEvento(tx, j.id, null, "aprovado", { versao: j.confirmacao_versao });
     if (j.order_id) {
       const [o] = await tx.query<{ stage: string }>("SELECT stage FROM orders WHERE id = $1 FOR UPDATE", [j.order_id]);
-      if (o && o.stage !== "PRODUCAO") {
+      // Só adianta o pedido que ainda espera a arte; o que já passou da produção não volta
+      if (o && (o.stage === "CONFIRMADO" || o.stage === "ARTE")) {
         await tx.query("UPDATE orders SET stage = 'PRODUCAO', stage_changed_at = NOW(), late_alert_at = NULL WHERE id = $1", [j.order_id]);
         await tx.query("INSERT INTO order_events (order_id, user_id, from_stage, to_stage) VALUES ($1, NULL, $2, 'PRODUCAO')", [j.order_id, o.stage]);
       }
@@ -340,7 +361,7 @@ export async function receberRespostaDoCliente(
     }
     return { resultado: "aprovado" as const, jobId: j.id };
   });
-  if (r.resultado === "aprovado" && r.jobId) await devolverAoAtendimento(r.jobId, null);
+  if (r.resultado === "aprovado" && r.jobId) await devolverAoAtendimento(r.jobId, null, undefined, mensagemId ? [mensagemId] : []);
   return r.resultado;
 }
 
@@ -348,7 +369,7 @@ export async function receberRespostaDoCliente(
  * Tira a conversa do designer. Volta para a Lia, a não ser que o vendedor já atendesse quando o job abriu:
  * aí só avisa o vendedor. Ponte fora não desfaz nada; o designer é avisado para tentar de novo.
  */
-export async function devolverAoAtendimento(jobId: string, atorId: string | null, nota?: string): Promise<void> {
+export async function devolverAoAtendimento(jobId: string, atorId: string | null, nota?: string, consumidas: string[] = []): Promise<void> {
   const j = await one<{ lead_id: string; phone: string; designer_id: string | null; assigned_to: string | null; modo_anterior: string | null }>(
     `SELECT j.lead_id, l.phone, j.designer_id, l.assigned_to,
        (SELECT e.dados->>'modo_anterior' FROM design_events e WHERE e.job_id = j.id AND e.tipo = 'criado' LIMIT 1) AS modo_anterior
@@ -357,7 +378,7 @@ export async function devolverAoAtendimento(jobId: string, atorId: string | null
   );
   if (!j) throw new DesignError("Job não encontrado.", 404);
   const voltaParaLia = j.modo_anterior !== "humano";
-  const ponte = voltaParaLia ? await callPonte("/devolver", { telefone: j.phone, ...(nota ? { nota } : {}) }) : { ok: true as const };
+  const ponte = voltaParaLia ? await callPonte("/devolver", { telefone: j.phone, ...(nota ? { nota } : {}), ...(consumidas.length ? { consumidas } : {}) }) : { ok: true as const };
   await transaction(async (tx) => {
     if (!ponte.ok) {
       if (j.designer_id) {
@@ -402,7 +423,8 @@ export async function listarJobs(user: Usuario): Promise<CardJob[]> {
   let escopo = "TRUE";
   if (user.role !== "ADMIN") {
     params.push(user.id);
-    escopo = "j.designer_id = $1";
+    // Job sem dono (aberto quando não havia designer ativo) aparece para todos, que podem assumir
+    escopo = "(j.designer_id = $1 OR j.designer_id IS NULL)";
   }
   const rows = await query<Omit<CardJob, "miniatura"> & { original: string | null }>(
     `SELECT j.id, j.lead_id, COALESCE(l.name, 'Cliente') AS cliente, j.ficha->>'peca' AS peca, j.prazo, j.prioridade, j.stage,

@@ -16,6 +16,7 @@ const canal = {
   enviarImagem: vi.fn(async () => {}),
   enviar: vi.fn(async () => {}),
 };
+const devolverParaIa = vi.fn(async () => {});
 let arquivos: ArquivoRecebido[] = [];
 let pedidos: PedidoDesign[] = [];
 let crmFora = false;
@@ -28,7 +29,7 @@ beforeAll(async () => {
       porta: 0,
       segredo: SEGREDO,
       canal: canal as unknown as CanalWwebjs,
-      ponte: {} as Ponte,
+      ponte: { devolverParaIa } as unknown as Ponte,
       lia: {} as ArmazemModoLia,
       log: () => {},
       lerArquivos: async () => arquivos,
@@ -125,5 +126,17 @@ describe("/encaminhar-design", () => {
     const res = await post("/encaminhar-design", { telefone: "5511900000001" });
     expect(res.status).toBe(502);
     expect(((await res.json()) as { erro?: string }).erro).toBeTruthy();
+  });
+});
+
+describe("/devolver", () => {
+  it("repassa à ponte só os ids de mensagem válidos em consumidas", async () => {
+    const r = await post("/devolver", { telefone: "5511900000001", consumidas: ["w-1", 42, "x".repeat(201), "w-2"] });
+    expect(r.status).toBe(200);
+    expect(devolverParaIa).toHaveBeenCalledWith("5511900000001", undefined, ["w-1", "w-2"]);
+  });
+  it("sem consumidas devolve com lista vazia", async () => {
+    await post("/devolver", { telefone: "5511900000001", nota: "pagou" });
+    expect(devolverParaIa).toHaveBeenCalledWith("5511900000001", "pagou", []);
   });
 });

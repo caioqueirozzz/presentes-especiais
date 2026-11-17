@@ -23,6 +23,14 @@ async function camisaNoFundoBranco(): Promise<Buffer> {
   return sharp(px, { raw: { width: w, height: h, channels: 3 } }).png().toBuffer();
 }
 
+// Logo em PNG com fundo transparente: quadrado azul-marinho com uma faixa preta (o texto do logo)
+async function logoTransparente(): Promise<Buffer> {
+  const w = 100, h = 100, px = Buffer.alloc(w * h * 4, 0);
+  for (let y = 20; y < 80; y++)
+    for (let x = 20; x < 80; x++) px.set(y < 40 ? [0x00, 0x00, 0x00, 0xff] : [0x0a, 0x2a, 0x66, 0xff], (y * w + x) * 4);
+  return sharp(px, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
+}
+
 describe("paleta", () => {
   it("descarta o fundo que ocupa a borda da foto e calcula a participação sobre a peça", async () => {
     const p = await calcularPaleta(await camisaNoFundoBranco());
@@ -35,6 +43,10 @@ describe("paleta", () => {
     expect(p[0].hex).toBe("#0A2A66");
     expect(p[1].hex).toBe("#FFCC00");
     expect(p[0].participacao).toBeCloseTo(0.7, 1);
+  });
+  it("PNG transparente: o fundo sai sem levar junto o preto do logo", async () => {
+    const p = await calcularPaleta(await logoTransparente());
+    expect(p.map((c) => c.hex)).toEqual(["#0A2A66", "#000000"]);
   });
   it("é determinística", async () => {
     const img = await duasCores();

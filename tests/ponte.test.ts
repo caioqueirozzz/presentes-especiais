@@ -201,6 +201,29 @@ describe("Ponte", () => {
     });
   });
 
+  describe("devolução pelo CRM com mensagem consumida", () => {
+    it("o APROVO que o CRM já consumiu sai da fila e não chega à IA; as outras seguem", async () => {
+      const { canal, agente, ponte } = montar();
+      const aprovo = canal.mensagem({ chatId: CLIENTE, texto: "APROVO" });
+      await ponte.receber(aprovo);
+      await ponte.receber(canal.mensagem({ chatId: CLIENTE, texto: "e o prazo?" }));
+      await vi.advanceTimersByTimeAsync(1_000);
+      await ponte.devolverParaIa(TEL, undefined, [aprovo.id]);
+      await vi.runAllTimersAsync();
+      expect(agente.lotes.flatMap((l) => l.mensagens.map((m) => m.texto))).toEqual(["e o prazo?"]);
+      expect(agente.eventos.map((e) => e.tipo)).toContain("devolver");
+    });
+
+    it("consumida antes de a ponte receber: a mensagem é ignorada quando chega", async () => {
+      const { canal, agente, ponte } = montar();
+      const aprovo = canal.mensagem({ chatId: CLIENTE, texto: "APROVO" });
+      await ponte.devolverParaIa(TEL, undefined, [aprovo.id]);
+      await ponte.receber(aprovo);
+      await vi.runAllTimersAsync();
+      expect(agente.lotes).toEqual([]);
+    });
+  });
+
   describe("tipos de mensagem", () => {
     // A resposta ao áudio espera o "digitando" (timer): avance o relógio antes de aguardar o receber.
     it("áudio: resposta fixa, não vai ao agente, marca como lida", async () => {

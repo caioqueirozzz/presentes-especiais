@@ -44,8 +44,13 @@ const POR_ETAPA: Record<Etapa, Acao[]> = {
 };
 
 /** Botões que a tela mostra. O servidor confere de novo cada um. */
-export function botoesDaEtapa(stage: Etapa, quem: { souDesigner: boolean; isAdmin: boolean; semDesigner: boolean }): Acao[] {
+export function botoesDaEtapa(
+  stage: Etapa,
+  quem: { souDesigner: boolean; isAdmin: boolean; semDesigner: boolean; conversaComDesigner?: boolean }
+): Acao[] {
   if (quem.semDesigner && quem.souDesigner) return POR_ETAPA[stage].length ? ["assumir"] : [];
   if (!quem.isAdmin && !(quem.souDesigner && !quem.semDesigner)) return [];
+  // Job fechado com a conversa ainda no designer: a devolução à Lia falhou (ponte fora) e precisa ser refeita
+  if (!POR_ETAPA[stage].length && quem.conversaComDesigner) return ["devolver"];
   return POR_ETAPA[stage];
 }

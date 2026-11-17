@@ -20,6 +20,12 @@ describe("detectarTipo", () => {
     expect(detectarTipo(b())).toBeNull();
     expect(detectarTipo(txt("MZ\x90\0"))).toBeNull();
     expect(detectarTipo(txt("<html><svg/></html>"))).toBeNull();
+    // Exportado por Illustrator / Inkscape / Corel: comentário e DOCTYPE antes do <svg>
+    expect(
+      detectarTipo(txt(['<?xml version="1.0"?>', "<!-- Generator: Adobe Illustrator -->", '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "x">', "<svg/>"].join("\n")))
+    ).toBe("svg");
+    // PDF com bytes antes do cabeçalho
+    expect(detectarTipo(txt(["", "", "%PDF-1.7"].join("\n")))).toBe("pdf");
     expect(detectarTipo(txt("RIFF\0\0\0\0WAVE"))).toBeNull();
   });
 });

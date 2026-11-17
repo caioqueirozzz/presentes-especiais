@@ -525,7 +525,7 @@ export async function ingestLiveMessage(m: LiveMessage): Promise<{ leadId: strin
   if (result.created) await autoAssignLead(result.leadId);
   if (result.inserted && result.fromClient && kind === "texto") {
     // A mensagem já está gravada: erro no design não pode virar 500 (a ponte reenviaria)
-    await receberRespostaDoCliente(result.leadId, body).catch((err) => console.error("confirmação de design:", err));
+    await receberRespostaDoCliente(result.leadId, body, m.id, m.timestamp).catch((err) => console.error("confirmação de design:", err));
   }
   return { leadId: result.leadId, created: result.created, inserted: result.inserted };
 }

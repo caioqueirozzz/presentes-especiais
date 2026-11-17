@@ -15,7 +15,7 @@ import type { CanalWwebjs } from "./sessao.js";
  *  GET  /status             estado da conexão e o QR (texto) quando houver
  *  POST /nova-vinculacao    desvincula o aparelho e gera um QR novo
  *  POST /enviar             { telefone, texto } → { id } (vale como atendente: a IA pausa na conversa)
- *  POST /devolver           { telefone, nota? } → devolve a conversa à IA
+ *  POST /devolver           { telefone, nota?, consumidas? } → devolve a conversa à IA; consumidas não chegam a ela
  *  POST /enviar-midia       { telefone, url, legenda } → { id } (foto do mockup; vale como atendente, igual ao /enviar)
  *  POST /encaminhar-design  { telefone, requested_by? } → { jobId, imagens } (abre o job com os arquivos da conversa)
  *  GET  /lia                modo da Lia (ligada | teste | desligada) e números de teste
@@ -138,7 +138,10 @@ export function tratadorControle(opcoes: OpcoesControle): (req: IncomingMessage,
         const corpo = await lerJson(req);
         const telefone = typeof corpo.telefone === "string" ? corpo.telefone.replace(/\D/g, "") : "";
         if (telefone.length < 10) return responder(res, 400, { erro: "telefone obrigatório" });
-        await ponte.devolverParaIa(telefone, typeof corpo.nota === "string" ? corpo.nota.slice(0, 500) : undefined);
+        const consumidas = Array.isArray(corpo.consumidas)
+          ? corpo.consumidas.filter((id): id is string => typeof id === "string" && id.length <= 200).slice(0, 20)
+          : [];
+        await ponte.devolverParaIa(telefone, typeof corpo.nota === "string" ? corpo.nota.slice(0, 500) : undefined, consumidas);
         return responder(res, 200, { ok: true });
       }
       return responder(res, 404, { erro: "rota desconhecida" });

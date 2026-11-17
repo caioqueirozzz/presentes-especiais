@@ -19,6 +19,10 @@ describe("botoesDaEtapa", () => {
     expect(acoes("APROVADO")).toEqual([]);
     expect(acoes("CANCELADO")).toEqual([]);
   });
+  it("Aprovado ou Cancelado com a conversa ainda no designer (a ponte falhou): só Devolver", () => {
+    expect(botoesDaEtapa("APROVADO", { ...designer, conversaComDesigner: true })).toEqual(["devolver"]);
+    expect(botoesDaEtapa("CANCELADO", { ...designer, conversaComDesigner: true })).toEqual(["devolver"]);
+  });
   it("Assumir só para designer em job sem designer, e então nada mais", () => {
     expect(acoes("NA_FILA", { souDesigner: true, isAdmin: false, semDesigner: true })).toEqual(["assumir"]);
     expect(acoes("NA_FILA", { souDesigner: false, isAdmin: true, semDesigner: true })).not.toContain("assumir");

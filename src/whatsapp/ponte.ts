@@ -167,9 +167,15 @@ export class Ponte {
     }
   }
 
-  /** Devolve a conversa à IA a pedido de fora (o CRM), como o #devolver digitado no chip. */
-  devolverParaIa(telefone: string, nota?: string): Promise<void> {
-    return this.atendimento.devolver(normalizarTelefone(telefone), nota, "pelo CRM");
+  /**
+   * Devolve a conversa à IA a pedido de fora (o CRM), como o #devolver digitado no chip. consumidas são
+   * mensagens do cliente que o CRM já tratou (o "APROVO" da arte): saem da fila e não chegam à IA.
+   */
+  devolverParaIa(telefone: string, nota?: string, consumidas: string[] = []): Promise<void> {
+    const tel = normalizarTelefone(telefone);
+    for (const id of consumidas) this.fila.cancelar(tel, id);
+    if (consumidas.length) this.concluir(consumidas);
+    return this.atendimento.devolver(tel, nota, "pelo CRM");
   }
 
   /**
