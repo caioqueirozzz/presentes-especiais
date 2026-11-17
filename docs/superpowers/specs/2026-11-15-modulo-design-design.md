@@ -562,3 +562,17 @@ pushar, junte os commits (docs + feat + fix). Push e PR só com o OK do João.
 - **Cliente que responde "aprovo" fora de hora** (sem confirmação pendente): não aprova nada, por desenho.
 - **Custo:** cada job faz uma chamada de visão com até 4 imagens de 1024 px. Estime pelos tokens gravados
   em `design_events`, não no chute.
+
+## 16. Decisões de 16/11 (João, no plano)
+
+| # | Decisão | Por quê |
+|---|---|---|
+| D8 | As branches das entregas são encadeadas: `kit-de-partida-por-ia` parte de `quadro-de-design`, e `lia-encaminha-ao-design` parte de `kit-de-partida-por-ia` | A entrega 2 precisa da migration 006 e do `design.ts` da entrega 1 |
+| D9 | No modo disco, a rota `/api/design/arquivo` vale só pela assinatura HMAC com validade de 10 min, sem login (substitui "também exige usuário logado" da seção 6) | Quem baixa o mockup para enviar é a ponte (`MessageMedia.fromUrl`), sem sessão; é o mesmo modelo da URL assinada do R2 |
+| D10 | `pantone.json` começa com uma tabela curta provisória (~40 cores Pantone C comuns, HEX aproximado de referência pública), trocada quando o Dudu responder (seção 13.3) | A paleta funciona desde a entrega 2 e já aparece como "aproximada" |
+| D11 | `encaminharParaDesign` fica em `src/integrations/crm/design.ts`, no padrão de `historicoCliente.ts`, e não em `src/whatsapp/crm.ts` (seção 9.2) | A ferramenta da Lia não importa da pasta da ponte, e testes e evals trocam a função por um falso |
+| D12 | A tela do job não desenha as marcações (`bbox`) sobre a foto; a ficha continua gravando o campo | No dogfooding da entrega 2 o `gpt-4o-mini` errou a posição nas 5 fotos; a posição em texto ("peito esquerdo") veio certa. As caixas voltam se um modelo acertar |
+| D13 | A paleta descarta o fundo: se uma cor ocupa ao menos 80% da borda da miniatura, ela e as cores parecidas saem da conta (seção 8, passo 5) | Nas fotos de catálogo o fundo branco ficava com 38% a 71% da paleta. Cores pequenas do logo ainda podem ficar abaixo dos 3% |
+| D14 | A conversa do briefing usa só as mensagens depois do último job aprovado ou cancelado do lead, até 20 (seção 8, passo 3) | Com as últimas 20 sem corte, o briefing de um cliente recorrente herdava o pedido anterior |
+| D15 | O DESIGNER vê no quadro, além dos jobs dele, os jobs sem designer, para poder assumir (seções 7.1 e 10.1) | Job aberto antes de existir designer ativo ficava invisível para todos; achado I2 da revisão final |
+| D16 | Arquivo inválido (vazio, grande ou de tipo não aceito) é pulado e registrado em vez de recusar o lote; vão no máximo os 10 arquivos mais recentes da conversa; o mesmo arquivo (sha256) não entra de novo no job (seções 6 e 9.2) | Um SVG exportado do Illustrator ou a 11ª foto derrubavam o encaminhamento inteiro, e cada reenvio regravava as fotos e gastava outra análise; achados I3 e I4 |
