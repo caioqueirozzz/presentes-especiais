@@ -9,6 +9,7 @@ import { detalharProdutoSchema, detalharProdutoHandler } from "./detalharProduto
 import { prepararOrcamentoSchema, prepararOrcamentoHandler } from "./prepararOrcamento.js";
 import { consultarPedidoSchema, consultarPedidoHandler } from "./consultarPedido.js";
 import { registrarArteSchema, registrarArteHandler } from "./registrarArte.js";
+import { encaminharDesignSchema, encaminharDesignHandler } from "./encaminharDesign.js";
 import { transferirHumanoSchema, transferirHumanoHandler } from "./transferirHumano.js";
 import { registrarContextoSchema, registrarContextoHandler } from "./registrarContexto.js";
 import { andamentoPedidoSchema, andamentoPedidoHandler } from "./andamentoPedido.js";
@@ -95,6 +96,14 @@ export const tools: ToolDefinition[] = [
     inputSchema: schemaDaFerramenta(registrarArteSchema),
     schema: registrarArteSchema,
     handler: registrarArteHandler as ToolDefinition["handler"],
+  },
+  {
+    name: "encaminhar_design",
+    description:
+      "Encaminha à equipe de design: referência de uniforme ou peça para reproduzir, criação de arte ou ajuste numa arte enviada. Logo pronta só para gravar não: use registrar_arte.",
+    inputSchema: schemaDaFerramenta(encaminharDesignSchema),
+    schema: encaminharDesignSchema,
+    handler: encaminharDesignHandler as ToolDefinition["handler"],
   },
   {
     name: "registrar_contexto",

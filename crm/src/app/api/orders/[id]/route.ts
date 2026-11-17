@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { gatilhoArte } from "@/lib/design";
 import { isAdmin, isUuid, jsonError, readJson, requireAdmin, requireUser, serverError } from "@/lib/access";
 import { one, query, transaction } from "@/lib/db";
 import { ORDER_COLUMNS, isOrderStage, orderDate, orderText } from "@/lib/orders";
@@ -66,11 +67,11 @@ export async function PATCH(request: Request, { params }: Context) {
 
   try {
     const found = await transaction(async (tx) => {
-      const [current] = await tx.query<{ stage: string; due_date: string | null }>(
-        "SELECT stage, to_char(due_date, 'YYYY-MM-DD') AS due_date FROM orders WHERE id = $1 FOR UPDATE",
+      const [current] = await tx.query<{ stage: string; due_date: string | null; lead_id: string | null }>(
+        "SELECT stage, to_char(due_date, 'YYYY-MM-DD') AS due_date, lead_id FROM orders WHERE id = $1 FOR UPDATE",
         [id]
       );
-      if (!current) return false;
+      if (!current) return null;
       if ("due_date" in body && (orderDate(body.due_date) ?? null) !== current.due_date) clearLate = true;
       if (stage && stage !== current.stage) {
         clearLate = true;
@@ -80,9 +81,10 @@ export async function PATCH(request: Request, { params }: Context) {
       }
       if (clearLate) sets.push("late_alert_at = NULL");
       if (sets.length) await tx.query(`UPDATE orders SET ${sets.join(", ")} WHERE id = $1`, values);
-      return true;
+      return current;
     });
     if (!found) return jsonError("Pedido não encontrado.", 404);
+    if (stage === "ARTE" && found.stage !== "ARTE") await gatilhoArte({ leadId: found.lead_id, orderId: id, atorId: guard.user.id });
     return NextResponse.json({ ok: true });
   } catch (err) {
     return serverError(err, "atualizar pedido");

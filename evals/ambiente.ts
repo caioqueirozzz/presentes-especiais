@@ -5,6 +5,7 @@ import { setProductIndexStore } from "../src/tools/buscarProdutos.js";
 import { setOrderIndexStore } from "../src/tools/consultarPedido.js";
 import { setLacunaStore } from "../src/tools/consultarConhecimento.js";
 import { MemoryLacunaStore } from "../src/knowledge/lacunas.js";
+import { setEncaminharParaDesign } from "../src/integrations/crm/design.js";
 
 /** Os cenários rodam só sobre os mocks: nada lido de data/ nem gravado na fila real de lacunas. */
 export async function prepararAmbienteDosEvals(): Promise<void> {
@@ -17,4 +18,6 @@ export async function prepararAmbienteDosEvals(): Promise<void> {
   setOrderIndexStore(pedidos);
 
   setLacunaStore(new MemoryLacunaStore());
+  // Nenhum eval abre job no CRM de verdade
+  setEncaminharParaDesign(async (p) => ({ jobId: "job-eval", imagens: p.arquivos.length }));
 }

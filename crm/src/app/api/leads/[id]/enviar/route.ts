@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getLeadForUser, jsonError, readJson, requireUser, serverError } from "@/lib/access";
 import { transaction } from "@/lib/db";
+import { ligarConversaComDesigner } from "@/lib/design";
 import { logEvent } from "@/lib/leads";
 import { callPonte } from "@/lib/whatsapp";
 
@@ -11,7 +12,7 @@ type Context = { params: Promise<{ id: string }> };
  * Vale como atendente na ponte: a Lia pausa nesta conversa até alguém devolver.
  */
 export async function POST(request: Request, { params }: Context) {
-  const guard = await requireUser();
+  const guard = await requireUser({ allowDesigner: true });
   if (guard.error) return guard.error;
   const { id } = await params;
   const body = await readJson(request);
@@ -44,6 +45,7 @@ export async function POST(request: Request, { params }: Context) {
       );
       if (lead.agent_mode === "ia") await logEvent(tx, lead.id, guard.user.id, "ATENDIMENTO", { modo: "humano" });
     });
+    if (guard.user.role === "DESIGNER") await ligarConversaComDesigner(lead.id, guard.user.id);
     return NextResponse.json({ ok: true, id: sent.data.id });
   } catch (err) {
     return serverError(err, "enviar mensagem");

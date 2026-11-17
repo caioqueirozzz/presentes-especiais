@@ -26,7 +26,10 @@ export function jsonError(message: string, status: number) {
 type Guard = { user: SessionUser; error?: never } | { user?: never; error: NextResponse };
 
 /** Usuário ativo da sessão. Com troca de senha pendente, só as rotas de senha passam. */
-export async function requireUser(options: { allowPendingPassword?: boolean } = {}): Promise<Guard> {
+/** DESIGNER só passa nas rotas que pedem: funil, pedidos, relatórios e equipe ficam fechados por padrão. */
+export const barraDesigner = (user: Pick<SessionUser, "role">, allowDesigner = false) => user.role === "DESIGNER" && !allowDesigner;
+
+export async function requireUser(options: { allowPendingPassword?: boolean; allowDesigner?: boolean } = {}): Promise<Guard> {
   const user = await getSessionUser();
   if (!user) {
     // Token com assinatura válida mas usuário inexistente/inativo/versão antiga: apagar o
@@ -39,6 +42,7 @@ export async function requireUser(options: { allowPendingPassword?: boolean } = 
   if (user.mustChangePassword && !options.allowPendingPassword) {
     return { error: jsonError("Defina uma nova senha para continuar.", 403) };
   }
+  if (barraDesigner(user, options.allowDesigner)) return { error: jsonError("Acesso restrito.", 403) };
   return { user };
 }
 
@@ -58,6 +62,7 @@ export const isAdmin = (user: Pick<SessionUser, "role">) => user.role === "ADMIN
 export function leadScope(user: SessionUser, params: unknown[], alias = "l"): string {
   if (isAdmin(user)) return "TRUE";
   params.push(user.id);
+  if (user.role === "DESIGNER") return `EXISTS (SELECT 1 FROM design_jobs j WHERE j.lead_id = ${alias}.id AND j.designer_id = $${params.length})`;
   return `${alias}.assigned_to = $${params.length}`;
 }
 

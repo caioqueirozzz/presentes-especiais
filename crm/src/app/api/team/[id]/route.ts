@@ -39,10 +39,12 @@ export async function PATCH(request: Request, { params }: Context) {
     if (typeof body.receives_leads === "boolean") set("receives_leads", body.receives_leads);
 
     let revoke = false;
-    if (body.role === "ADMIN" || body.role === "COLABORADOR") {
+    if (body.role === "ADMIN" || body.role === "COLABORADOR" || body.role === "DESIGNER") {
       if (self && body.role !== "ADMIN") return jsonError("Você não pode remover o seu próprio acesso de admin.", 400);
       if (body.role !== member.role) {
         set("role", body.role);
+        // Designer fora do rodízio de vendedores
+        if (body.role === "DESIGNER") set("receives_leads", false);
         revoke = true;
       }
     }
@@ -63,7 +65,7 @@ export async function PATCH(request: Request, { params }: Context) {
     if (sets.length === 0) return jsonError("Nada para atualizar.", 400);
 
     // Nunca deixar a empresa sem admin ativo
-    if ((body.role === "COLABORADOR" || body.is_active === false) && member.role === "ADMIN") {
+    if ((body.role === "COLABORADOR" || body.role === "DESIGNER" || body.is_active === false) && member.role === "ADMIN") {
       const admins = await one<{ n: number }>("SELECT COUNT(*)::int AS n FROM users WHERE role = 'ADMIN' AND is_active AND id <> $1", [id]);
       if (!admins?.n) return jsonError("É preciso manter pelo menos um admin ativo.", 400);
     }

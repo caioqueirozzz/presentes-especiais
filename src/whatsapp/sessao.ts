@@ -141,6 +141,17 @@ export class CanalWwebjs implements CanalWhatsApp {
     return enviada.id._serialized;
   }
 
+  /** Foto pedida pelo CRM (mockup do designer). Mesmo envio de imagem testado em 05/11, resolvendo o número como enviarTexto. */
+  async enviarImagemParaTelefone(telefone: string, url: string, legenda: string): Promise<string> {
+    const cliente = this.exigirCliente();
+    const numero = await cliente.getNumberId(telefone.replace(/\D/g, ""));
+    if (!numero) throw new Error("Este número não tem WhatsApp.");
+    const midia = await MessageMedia.fromUrl(url, { unsafeMime: true });
+    const enviada = await cliente.sendMessage(numero._serialized, midia, { caption: legenda, sendSeen: false });
+    if (!enviada) throw new Error("O WhatsApp não confirmou o envio.");
+    return enviada.id._serialized;
+  }
+
   async iniciar(): Promise<void> {
     try {
       await this.lancar();
