@@ -57,6 +57,12 @@ import { logarBuscaDegradada } from "./logBusca.js";
 export const PISO_TIPO_PADRAO = 0.6;
 /** Distância máxima até o melhor tipo da rodada: 0,20 separa a empilhadeira (1,000) do carro (0,717). */
 export const MARGEM_TIPO_PADRAO = 0.2;
+/**
+ * Sem `tipo_produto`, cosseno mínimo entre a consulta e o texto do produto. Sem ele
+ * o catálogo inteiro vira candidato e a busca nunca responde "não encontrei".
+ */
+// shortcut: chute sem o catálogo real, calibrar com --comparar --piso-texto depois do sync completo
+export const PISO_TEXTO_PADRAO = 0.3;
 
 export interface RetratoSemantico {
   vetores: ConjuntoVetores;
@@ -74,11 +80,13 @@ export interface DependenciasSemantica {
   modelo?: string;
   piso?: number;
   margem?: number;
+  pisoTexto?: number;
 }
 
 export class MotorSemantico {
   private readonly cache = new CacheEmbeddings();
   private avisouSemVetores = false;
+  private avisouModelo = false;
 
   constructor(private readonly deps: DependenciasSemantica) {}
 
@@ -88,6 +96,14 @@ export class MotorSemantico {
 
   get margem(): number {
     return this.deps.margem ?? MARGEM_TIPO_PADRAO;
+  }
+
+  get pisoTexto(): number {
+    return this.deps.pisoTexto ?? PISO_TEXTO_PADRAO;
+  }
+
+  private get modelo(): string {
+    return this.deps.modelo ?? MODELO_EMBEDDING;
   }
 
   /**
@@ -105,9 +121,19 @@ export class MotorSemantico {
       return null;
     }
     this.avisouSemVetores = false;
+    // Vetor de outro modelo mede outra coisa (ou outra dimensão): cosseno vira lixo.
+    if (vetores.modelo !== this.modelo) {
+      if (!this.avisouModelo) {
+        this.avisouModelo = true;
+        logarBuscaDegradada({ motivo: "modelo_divergente", detalhe: `${vetores.modelo} ≠ ${this.modelo}` });
+      }
+      return null;
+    }
+    this.avisouModelo = false;
+    const vetoresTipo = await this.deps.vetoresTipo.carregar();
     return {
       vetores,
-      vetoresTipo: await this.deps.vetoresTipo.carregar(),
+      vetoresTipo: vetoresTipo?.modelo === this.modelo ? vetoresTipo : null,
       tipos: mapaDeTipos(await this.deps.tipos.carregar()),
     };
   }
@@ -122,7 +148,7 @@ export class MotorSemantico {
     const guardado = this.cache.obter(limpo);
     if (guardado) return guardado;
     try {
-      const v = await embeddingDe(this.deps.embeddings, limpo, this.deps.modelo ?? MODELO_EMBEDDING);
+      const v = await embeddingDe(this.deps.embeddings, limpo, this.modelo);
       if (v) this.cache.guardar(limpo, v);
       return v;
     } catch (err) {
@@ -155,7 +181,8 @@ export function pontuarCatalogo(
   vetorConsulta: Float32Array,
   vetorTipo: Float32Array | null,
   piso: number,
-  margem = MARGEM_TIPO_PADRAO
+  margem = MARGEM_TIPO_PADRAO,
+  pisoTexto = 0
 ): Map<string, PontuacaoSemantica> {
   const { vetores, vetoresTipo, tipos } = retrato;
   const out = new Map<string, PontuacaoSemantica>();
@@ -197,8 +224,22 @@ export function pontuarCatalogo(
     }
 
     const bruto = cossenoNaLinha(vetorConsulta, vetores.matriz, linha, vetores.dimensao);
+    // Sem tipo, o piso de texto é o único filtro: sem ele todo o catálogo entraria.
+    if (!filtrandoPorTipo && bruto < pisoTexto) continue;
     out.set(id, { similaridade: Math.max(0, bruto), similaridadeTipo });
   }
 
   return out;
+}
+
+/**
+ * Produto que a semântica não consegue pontuar e por isso vai ao BM25 (spec §3.6):
+ * sem vetor, ou, filtrando por tipo, com um tipo que ainda não foi vetorizado
+ * (correção da loja feita depois da última geração).
+ */
+export function semNotaSemantica(id: string, retrato: RetratoSemantico, filtrandoPorTipo: boolean): boolean {
+  if (!retrato.vetores.linhaDe.has(id)) return true;
+  if (!filtrandoPorTipo || !retrato.vetoresTipo) return false;
+  const tipo = retrato.tipos.get(id);
+  return !!tipo && !retrato.vetoresTipo.linhaDe.has(tipo);
 }

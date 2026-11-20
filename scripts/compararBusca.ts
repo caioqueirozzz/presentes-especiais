@@ -24,7 +24,13 @@ import { config } from "../src/config.js";
 import { FileProductIndexStore, type ProdutoIndexado } from "../src/catalogo/indice.js";
 import { FileTipoStore, arquivoTiposPadrao, canonizarTipo } from "../src/catalogo/tipos.js";
 import { FileVectorStore, arquivosVetoresPadrao } from "../src/catalogo/vetores.js";
-import { MotorSemantico, pontuarCatalogo, PISO_TIPO_PADRAO, MARGEM_TIPO_PADRAO } from "../src/catalogo/semantica.js";
+import {
+  MotorSemantico,
+  pontuarCatalogo,
+  PISO_TIPO_PADRAO,
+  MARGEM_TIPO_PADRAO,
+  PISO_TEXTO_PADRAO,
+} from "../src/catalogo/semantica.js";
 import { clienteEmbeddingsPadrao } from "../src/llm/embeddings.js";
 import { IndiceBM25 } from "../src/busca/bm25.js";
 import { tokenizar } from "../src/busca/texto.js";
@@ -94,6 +100,7 @@ async function main() {
   const modo = config.brindeMe.mode === "http" ? "http" : "mock";
   const piso = numero("piso", PISO_TIPO_PADRAO);
   const margem = numero("margem", MARGEM_TIPO_PADRAO);
+  const pisoTexto = numero("piso-texto", PISO_TEXTO_PADRAO);
 
   if (!config.openaiApiKey) {
     console.error(`${RED}✗${RESET} OPENAI_API_KEY não está no .env: a medição precisa gerar o embedding de cada consulta.`);
@@ -131,7 +138,7 @@ async function main() {
   const bm25 = bm25De(produtos);
 
   console.log(`${BOLD}BM25 × semântica — ${config.storeName}${RESET}`);
-  console.log(`${GRAY}  ${consultas.length} consulta(s) · ${produtos.length} produto(s) · modo ${modo} · piso ${piso} · margem ${margem}${RESET}\n`);
+  console.log(`${GRAY}  ${consultas.length} consulta(s) · ${produtos.length} produto(s) · modo ${modo} · piso ${piso} · margem ${margem} · piso de texto ${pisoTexto}${RESET}\n`);
 
   // Um embedding por consulta e um por tipo, reaproveitados por toda a varredura.
   const vetores = new Map<string, { consulta: Float32Array; tipo: Float32Array | null }>();
@@ -158,7 +165,7 @@ async function main() {
 
   const topSemantico = (c: ConsultaJson, p: number, m: number): string[] => {
     const v = vetores.get(c.id)!;
-    const notas = pontuarCatalogo(ids, retrato, v.consulta, v.tipo, p, m);
+    const notas = pontuarCatalogo(ids, retrato, v.consulta, v.tipo, p, m, pisoTexto);
     return [...notas.entries()]
       .sort((a, b) => b[1].similaridade - a[1].similaridade)
       .slice(0, TOP)

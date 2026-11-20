@@ -158,6 +158,23 @@ describe("geração de tipos e vetores", () => {
     expect(r.falhas[0].erro).toBe("sem vetor");
   });
 
+  it("tipo sem vetor conta para a trava e nada é gravado", async () => {
+    recarregarCorrecoesDeTipo();
+    // 9 canecas + 1 mochila; o embedding do TIPO "mochila" falha = 10%, acima do limite
+    const produtos = [
+      ...Array.from({ length: 9 }, (_, i) => produtoIndexado(`t${i}`, `caneca t${i}`)),
+      produtoIndexado("t9", "mochila t9"),
+    ];
+    const d = deps({ embeddings: embeddingsFalso({ falharPara: (t) => t === "mochila" }) });
+
+    const r = await gerarTiposEVetores(produtos, d);
+
+    expect(r.travou).toBe(true);
+    expect(r.falhas).toEqual([{ id: "t9", nome: "mochila t9", erro: "sem vetor de tipo" }]);
+    expect(await d.vetoresTipo.carregar()).toBeNull();
+    expect(await d.vetoresProduto.carregar()).toBeNull();
+  });
+
   it("segunda rodada só mexe no que mudou", async () => {
     recarregarCorrecoesDeTipo();
     const d = deps();

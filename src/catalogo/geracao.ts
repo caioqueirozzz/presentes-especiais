@@ -132,7 +132,12 @@ export async function gerarTiposEVetores(
     opcoes.onProgresso?.({ fase: "vetor-produto", feitos: feitosVetor, total: precisamVetor.length });
   }
 
-  // --- 3. Conferência e trava ----------------------------------------------------
+  // --- 3. Vetores dos tipos distintos (antes da trava: tipo sem vetor some do filtro) --
+  const conjuntoTipos = await calcularVetoresDeTipo(tabela, deps, { ...opcoes, modeloEmbedding, agora });
+  const tiposComVetor = new Set(conjuntoTipos?.ids ?? []);
+  const tipoDe = mapaDeTipos(tabela);
+
+  // --- 4. Conferência e trava ----------------------------------------------------
   const temVetor = (p: ProdutoIndexado): boolean =>
     novosVetores.has(p.id) ||
     (!!vetoresAnteriores &&
@@ -141,7 +146,8 @@ export async function gerarTiposEVetores(
 
   const falhas: ResultadoGeracao["falhas"] = [];
   for (const p of produtos) {
-    const semTipo = !tabela.produtos[p.id]?.tipo;
+    const tipo = tipoDe.get(p.id);
+    const semTipo = !tipo;
     const semVetor = !temVetor(p);
     if (semTipo || semVetor) {
       falhas.push({
@@ -149,6 +155,8 @@ export async function gerarTiposEVetores(
         nome: p.nome,
         erro: semTipo && semVetor ? "sem rótulo e sem vetor" : semTipo ? "sem rótulo" : "sem vetor",
       });
+    } else if (!tiposComVetor.has(tipo)) {
+      falhas.push({ id: p.id, nome: p.nome, erro: "sem vetor de tipo" });
     }
   }
 
@@ -166,7 +174,7 @@ export async function gerarTiposEVetores(
     return { ...base, travou: true, gravou: false };
   }
 
-  // --- 4. Monta a matriz final (novos + reaproveitados, na ordem do catálogo) ------
+  // --- 5. Monta a matriz final (novos + reaproveitados, na ordem do catálogo) ------
   const ids: string[] = [];
   const origem: Record<string, string> = {};
   const linhas: Float32Array[] = [];
@@ -200,24 +208,23 @@ export async function gerarTiposEVetores(
     origem,
     matriz,
   });
-
-  // --- 5. Vetores dos tipos distintos ---------------------------------------------
-  await gerarVetoresDeTipo(tabela, deps, { ...opcoes, modeloEmbedding, agora });
+  if (conjuntoTipos) await deps.vetoresTipo.salvar(conjuntoTipos);
 
   return { ...base, travou: false, gravou: true };
 }
 
 /**
  * Um vetor por tipo distinto. São poucas centenas, e o texto é o próprio tipo,
- * então aqui a chave de reaproveitamento é o texto, não a data.
+ * então aqui a chave de reaproveitamento é o texto, não a data. Só calcula: quem
+ * grava é a geração, depois da trava.
  */
-async function gerarVetoresDeTipo(
+async function calcularVetoresDeTipo(
   tabela: TabelaTipos,
   deps: DependenciasGeracao,
   opcoes: OpcoesGeracao & { modeloEmbedding: string; agora: () => Date }
-): Promise<void> {
+): Promise<Omit<ConjuntoVetores, "linhaDe"> | null> {
   const tipos = [...new Set(mapaDeTipos(tabela).values())].filter(Boolean).sort();
-  if (tipos.length === 0) return;
+  if (tipos.length === 0) return null;
 
   const anteriores = await deps.vetoresTipo.carregar();
   const aproveita = (t: string): Float32Array | null => {
@@ -240,7 +247,7 @@ async function gerarVetoresDeTipo(
         if (v) novos.set(t, v);
       });
     } catch {
-      // sem vetor de tipo, o filtro por tipo não roda para ele; a busca segue pela ordem
+      // lote perdido: os produtos desses tipos caem como falha e a trava decide
     }
     feitos += lote.length;
     opcoes.onProgresso?.({ fase: "vetor-tipo", feitos, total: faltam.length });
@@ -256,19 +263,19 @@ async function gerarVetoresDeTipo(
     origem[t] = t;
     linhas.push(v);
   }
-  if (linhas.length === 0) return;
+  if (linhas.length === 0) return null;
 
   const dimensao = linhas[0].length;
   const matriz = new Float32Array(linhas.length * dimensao);
   linhas.forEach((v, i) => matriz.set(v, i * dimensao));
-  await deps.vetoresTipo.salvar({
+  return {
     modelo: opcoes.modeloEmbedding,
     dimensao,
     gerado_em: opcoes.agora().toISOString(),
     ids,
     origem,
     matriz,
-  });
+  };
 }
 
 /** Só para quem precisa do conjunto montado sem passar pelo store (testes e scripts). */

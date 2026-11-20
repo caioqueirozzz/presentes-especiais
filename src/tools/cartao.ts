@@ -19,6 +19,8 @@ export interface DadosCartao {
   imagem_url: string | null;
   /** Sem quantidade, o cartão sai sem preço. */
   quantidade?: number;
+  /** A quantidade é o pedido mínimo do produto, não um número que o cliente deu. */
+  no_minimo?: boolean;
   /** Cores conferidas no site (até 6), na ordem de exibição. */
   cotadas: Array<{ cor: string; cotacao: ResultadoCotacao }>;
   /** Cores disponíveis além das conferidas. */
@@ -40,13 +42,17 @@ export function montarCartao(d: DadosCartao): Cartao {
   const linhas = [`*${d.nome}*`];
   if (cores.length) linhas.push(`Cores: ${cores.join(", ")}`);
   if (d.quantidade !== undefined) {
-    linhas.push(...linhasDePreco(d.cotadas, d.quantidade));
+    linhas.push(...linhasDePreco(d.cotadas, d.quantidade, d.no_minimo ?? false));
     if (d.outras.length) linhas.push(DEMAIS_CORES);
   }
   return { produto_id: d.produto_id, imagem_url: d.imagem_url, legenda: linhas.join("\n") };
 }
 
-function linhasDePreco(cotadas: DadosCartao["cotadas"], quantidade: number): string[] {
+/** "para 50 un." quando o cliente deu o número; "no pedido mínimo de 50 un." quando o número é do produto. */
+const paraQuantas = (quantidade: number, noMinimo: boolean) =>
+  noMinimo ? `no pedido mínimo de ${quantidade} un.` : `para ${quantidade} un.`;
+
+function linhasDePreco(cotadas: DadosCartao["cotadas"], quantidade: number, noMinimo = false): string[] {
   const comPreco = cotadas.filter(
     (c): c is { cor: string; cotacao: Cotacao } => cotou(c.cotacao) && c.cotacao.centavos > 0
   );
@@ -56,9 +62,9 @@ function linhasDePreco(cotadas: DadosCartao["cotadas"], quantidade: number): str
   const porValor = new Map<number, string[]>();
   for (const c of comPreco) porValor.set(c.cotacao.centavos, [...(porValor.get(c.cotacao.centavos) ?? []), c.cor]);
   if (porValor.size === 1) {
-    linhas.push(`${porUnidade(comPreco[0].cotacao.centavos)} para ${quantidade} un.`);
+    linhas.push(`${porUnidade(comPreco[0].cotacao.centavos)} ${paraQuantas(quantidade, noMinimo)}`);
   } else {
-    linhas.push(`Para ${quantidade} un.:`);
+    linhas.push(noMinimo ? `No pedido mínimo de ${quantidade} un.:` : `Para ${quantidade} un.:`);
     for (const [centavos, nomes] of [...porValor].sort((a, b) => a[0] - b[0])) {
       linhas.push(`${nomes.join(", ")}: ${porUnidade(centavos)}`);
     }

@@ -59,7 +59,7 @@ export const tools: ToolDefinition[] = [
   {
     name: "detalhar_produto",
     description:
-      "Retorna detalhes de um produto: cores ativas, estoque e personalizações. Com quantidade, o sistema envia ao cliente um cartão com foto e o preço exato do site de cada cor; o retorno traz cartoes_enviados, sem o preço. Não redigite o cartão. Use quando o cliente pedir mais informações sobre um produto específico, com o id que veio de buscar_produtos. Com quantidade, diga quais cores cobrem o pedido pelo campo cores_que_atendem_quantidade, sem comparar estoque de cabeça.",
+      "Retorna detalhes de um produto: cores ativas, estoque e personalizações. Com quantidade, o sistema envia ao cliente um cartão com foto e o preço exato do site de cada cor; o retorno traz cartoes_enviados, sem o preço. Não redigite o cartão. Use quando o cliente pedir mais informações sobre um produto específico, com o id que veio de buscar_produtos — inclusive o produto_id que veio em ajustes_sugeridos, que é fonte válida: se o cliente disser 'quero N dessa' sobre um ajuste, chame esta ferramenta com aquele id e a quantidade, em vez de buscar de novo. Com quantidade, diga quais cores cobrem o pedido pelo campo cores_que_atendem_quantidade, sem comparar estoque de cabeça.",
     inputSchema: schemaDaFerramenta(detalharProdutoSchema),
     schema: detalharProdutoSchema,
     handler: detalharProdutoHandler as ToolDefinition["handler"],

@@ -127,12 +127,24 @@ const TIPOS: TabelaTipos = {
   },
 };
 
-async function montar(opcoes: { semVetores?: boolean; semVetoresDeTipo?: boolean; falharEmbedding?: boolean } = {}) {
+async function montar(
+  opcoes: {
+    semVetores?: boolean;
+    semVetoresDeTipo?: boolean;
+    falharEmbedding?: boolean;
+    /** Produtos que ficam fora da matriz, como se fossem novos desde a geração. */
+    semVetorPara?: string[];
+    /** Modelo gravado nos vetores; o motor espera "falso". */
+    modeloVetores?: string;
+    tipos?: TabelaTipos;
+  } = {}
+) {
   const client = new ClienteCatalogoFalso(catalogoDoDogfooding());
   const index = new MemoryProductIndexStore();
   await sincronizarCatalogo(client, index, { agora: new Date("2026-11-09T10:00:00Z") });
 
-  const produtos = index.carregar().produtos;
+  const modelo = opcoes.modeloVetores ?? "falso";
+  const produtos = index.carregar().produtos.filter((p) => !opcoes.semVetorPara?.includes(p.id));
   const vetoresProduto = new MemoryVectorStore();
   const vetoresTipo = new MemoryVectorStore();
 
@@ -143,7 +155,7 @@ async function montar(opcoes: { semVetores?: boolean; semVetoresDeTipo?: boolean
       matriz.set(normalizar(vetorDoConceito(acharConceito(`${p.nome} ${p.categorias.join(" ")}`))), i * dim);
     });
     await vetoresProduto.salvar({
-      modelo: "falso",
+      modelo,
       dimensao: dim,
       gerado_em: "",
       ids: produtos.map((p) => p.id),
@@ -157,14 +169,15 @@ async function montar(opcoes: { semVetores?: boolean; semVetoresDeTipo?: boolean
     const dim = CONCEITOS.length;
     const matriz = new Float32Array(tipos.length * dim);
     tipos.forEach((t, i) => matriz.set(normalizar(vetorDoConceito(TEXTOS[t] ?? t)), i * dim));
-    await vetoresTipo.salvar({ modelo: "falso", dimensao: dim, gerado_em: "", ids: tipos, origem: {}, matriz });
+    await vetoresTipo.salvar({ modelo, dimensao: dim, gerado_em: "", ids: tipos, origem: {}, matriz });
   }
 
   const semantica = new MotorSemantico({
     vetoresProduto,
     vetoresTipo,
-    tipos: new MemoryTipoStore(TIPOS),
+    tipos: new MemoryTipoStore(opcoes.tipos ?? TIPOS),
     embeddings: embeddingsFalso({ falhar: opcoes.falharEmbedding }),
+    modelo: "falso",
     piso: 0.6,
   });
 
@@ -244,6 +257,7 @@ describe("nenhum_do_tipo", () => {
       vetoresTipo: (semantica as unknown as { deps: { vetoresTipo: MemoryVectorStore } }).deps.vetoresTipo,
       tipos: new MemoryTipoStore(tiposSemCamisa),
       embeddings: embeddingsFalso(),
+      modelo: "falso",
       piso: 0.6,
     });
     const r = await recomendar(
@@ -304,6 +318,60 @@ describe("sem tipo_produto", () => {
     expect(r.tipo).toBe("encontrados");
     // a caneca vem na frente pelo cosseno, mas o filtro por tipo não rodou
     expect(nomes(r)[0]).toBe("Caneca Mágica Personalizada");
+  });
+
+  it("consulta que nada no catálogo lembra cai no 'não encontrei' (piso de texto)", async () => {
+    const { client, index, tags, semantica } = await montar();
+    const r = await recomendar({ consulta: "xyzzy", quantidade: 50 }, { index, tags, client, semantica });
+    expect(r.tipo).toBe("nenhum");
+    if (r.tipo !== "nenhum") return;
+    expect(r.motivo).toBe("sem_correspondencia");
+  });
+
+  it("abaixo do piso de texto, a etiqueta da ocasião ainda admite (eval 11: 'produtos para natal')", async () => {
+    const { client, index, semantica } = await montar();
+    const tags = new MemoryOccasionTagStore({ porProduto: { "caneca-magica": ["natal"] }, porSku: {}, porCategoria: {} });
+    const r = await recomendar({ consulta: "xyzzy", ocasiao: "natal", quantidade: 50 }, { index, tags, client, semantica });
+    expect(nomes(r)).toEqual(["Caneca Mágica Personalizada"]);
+  });
+});
+
+describe("o que a semântica não pontua vai ao BM25 (spec §3.6)", () => {
+  it("produto sem vetor aparece pelo BM25 e não vira nenhum_do_tipo", async () => {
+    const { client, index, tags, semantica } = await montar({ semVetorPara: ["camisa"] });
+    const r = await recomendar(
+      { consulta: "camisa dry fit", tipoProduto: "camiseta", quantidade: 10 },
+      { index, tags, client, semantica }
+    );
+    expect(nomes(r)).toEqual(["Camisa Dry Fit Personalizada"]);
+  });
+
+  it("tipo corrigido que ainda não tem vetor entra pelo BM25 em vez de sumir", async () => {
+    const tipos: TabelaTipos = { ...TIPOS, produtos: { ...TIPOS.produtos, camisa: { tipo: "camisa polo", atualizado_em: "" } } };
+    const { client, index, tags, semantica } = await montar({ tipos });
+    const r = await recomendar(
+      { consulta: "camisa dry fit", tipoProduto: "camiseta", quantidade: 10 },
+      { index, tags, client, semantica }
+    );
+    expect(nomes(r)).toEqual(["Camisa Dry Fit Personalizada"]);
+  });
+
+  it("vetores de outro modelo: BM25 e log modelo_divergente uma vez", async () => {
+    const { client, index, tags, semantica } = await montar({ modeloVetores: "outro" });
+    const pedido = { consulta: "camisa dry fit", tipoProduto: "camiseta", quantidade: 10 };
+    const r = await recomendar(pedido, { index, tags, client, semantica });
+    expect(r.tipo).toBe("encontrados");
+    await recomendar(pedido, { index, tags, client, semantica });
+    expect(degradacoes.map((d) => d.motivo)).toEqual(["modelo_divergente"]);
+  });
+
+  it("tipo_produto no plural e com maiúscula é canonizado antes do embedding", async () => {
+    const { client, index, tags, semantica } = await montar();
+    const r = await recomendar(
+      { consulta: "camisa dry fit", tipoProduto: "Camisetas", quantidade: 10 },
+      { index, tags, client, semantica }
+    );
+    expect(nomes(r)).toEqual(["Camisa Dry Fit Personalizada"]);
   });
 });
 

@@ -36,8 +36,9 @@ import {
   radicaisDasOcasioes,
   type OccasionTagStore,
 } from "./ocasioes.js";
-import { pontuarCatalogo, type MotorSemantico } from "./semantica.js";
+import { pontuarCatalogo, semNotaSemantica, type MotorSemantico } from "./semantica.js";
 import { logarBuscaDegradada } from "./logBusca.js";
+import { canonizarTipo } from "./tipos.js";
 
 /** Quantas opções o agente apresenta (Fase 1: no máximo 3 por vez). */
 export const MAX_OPCOES = 3;
@@ -113,6 +114,12 @@ export type Ajuste = (
 ) & {
   /** Cor que o preço cota (a mais barata pelo índice): sem ela o modelo falaria o valor de uma cor como se fosse de todas. */
   cor?: string;
+  /**
+   * Id do subproduto dessa cor. É o que deixa o produto do ajuste entrar em
+   * `ultimasOpcoes`: sem ele, o "quero 200 dessa" do dogfooding virava busca
+   * nova e trazia outro produto, porque o id do ajuste não existia no estado.
+   */
+  subproduto_id?: string;
 };
 
 export type Recomendacao =
@@ -283,7 +290,8 @@ async function candidatosSemanticos(
   const vetorConsulta = await motor.embedding(pedido.consulta);
   if (!vetorConsulta) return null;
 
-  const tipoPedido = (pedido.tipoProduto ?? "").trim();
+  // Mesma forma dos tipos do catálogo: "Camisetas" e "camiseta" não podem dar cossenos diferentes.
+  const tipoPedido = canonizarTipo(pedido.tipoProduto ?? "");
   let vetorTipo: Float32Array | null = null;
   if (tipoPedido) {
     if (!retrato.vetoresTipo) {
@@ -304,20 +312,33 @@ async function candidatosSemanticos(
     motor.margem
   );
 
-  // Com tipo pedido e nada acima do piso: o catálogo não tem esse tipo de produto.
-  if (tipoPedido && pontuacoes.size === 0) return { candidatos: [], nenhumDoTipo: true };
+  // Quem a semântica não pontua entra pelo BM25 até a próxima geração (spec §3.6).
+  const filtrando = vetorTipo !== null;
+  const reserva = candidatosLexicais(
+    produtos.filter((p) => semNotaSemantica(p.id, retrato, filtrando)),
+    consulta,
+    deps
+  );
 
-  const candidatos: Candidato[] = [];
+  // Com tipo pedido e nada acima do piso: o catálogo não tem esse tipo de produto.
+  if (tipoPedido && pontuacoes.size === 0 && reserva.length === 0) return { candidatos: [], nenhumDoTipo: true };
+
+  const admitidos: Candidato[] = [];
   for (const p of produtos) {
     const nota = pontuacoes.get(p.id);
     if (!nota) continue;
-    candidatos.push({
-      produto: p,
-      similaridade: nota.similaridade,
-      ocasiaoConfere: consulta.ocasioes.length > 0 && etiquetadoCom(p, consulta.ocasioes, deps.tags),
-    });
+    const ocasiaoConfere = consulta.ocasioes.length > 0 && etiquetadoCom(p, consulta.ocasioes, deps.tags);
+    // Sem tipo, entra quem passa do piso de texto OU tem a etiqueta da ocasião, como no BM25
+    // ("produtos para natal" não lembra produto nenhum pelo texto, mas a etiqueta admite).
+    if (!filtrando && nota.similaridade < motor.pisoTexto && !ocasiaoConfere) continue;
+    admitidos.push({ produto: p, similaridade: nota.similaridade, ocasiaoConfere });
   }
-  return { candidatos, nenhumDoTipo: false };
+
+  // Normalizada pela melhor da rodada, como o BM25 (score/maxScore): o cosseno cru
+  // fica em ~0,2–0,6 e deixaria o peso da ocasião mandar na ordem.
+  const melhor = Math.max(0, ...admitidos.map((c) => c.similaridade));
+  const candidatos = admitidos.map((c) => ({ ...c, similaridade: melhor > 0 ? c.similaridade / melhor : 0 }));
+  return { candidatos: [...candidatos, ...reserva], nenhumDoTipo: false };
 }
 
 function orcamentoDe(p: PedidoRecomendacao): Orcamento {
@@ -442,8 +463,12 @@ export async function recomendar(
       }
       let cotacoes: ResultadoCotacao[] = [];
       let cores = oferta.cores;
-      if (pedido.quantidade !== undefined) {
-        const q = pedido.quantidade;
+      {
+        // Sem quantidade, cota no pedido MÍNIMO do próprio produto (oferta.quantidade):
+        // antes o cartão saía sem preço nenhum e o modelo preenchia o vazio com valor
+        // inventado ou com "a confirmar" (dogfooding de 09/11). Com o preço do mínimo,
+        // ele tem o que dizer e ainda precisa perguntar a quantidade.
+        const q = oferta.quantidade;
         const cotadas = oferta.cores.slice(0, MAX_CORES_COTADAS);
         cotacoes = await cotarAoVivo(
           deps.client,
@@ -595,14 +620,15 @@ async function precificarAjustes(
 ): Promise<Ajuste[]> {
   if (lista.length === 0) return [];
   const cotacoes = await cotarAoVivo(client, lista.map(({ ajuste, subprodutoId }) => ({ subprodutoId, quantidade: ajuste.quantidade })), agora);
-  return lista.map(({ ajuste, cor }, i) => {
+  return lista.map(({ ajuste, cor, subprodutoId }, i) => {
     const c = cotacoes[i];
     const exato = cotou(c) && c.centavos > 0 ? c.centavos : null;
     const preco = exato === null ? undefined : exato / 100;
     const total = exato === null ? undefined : arredondar((exato * ajuste.quantidade) / 100);
+    const comum = { cor: cor || undefined, subproduto_id: subprodutoId || undefined };
     return ajuste.tipo === "aumentar_orcamento"
-      ? { ...ajuste, preco_unitario_minimo: preco, total_estimado: total, cor: cor || undefined }
-      : { ...ajuste, preco_unitario: preco, total_estimado: total, cor: cor || undefined };
+      ? { ...ajuste, preco_unitario_minimo: preco, total_estimado: total, ...comum }
+      : { ...ajuste, preco_unitario: preco, total_estimado: total, ...comum };
   });
 }
 

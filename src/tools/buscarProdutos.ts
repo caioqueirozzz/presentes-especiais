@@ -117,6 +117,30 @@ function soEstoque(eliminadosPor: Partial<Record<MotivoInelegivel, number>>): bo
   return motivos.length > 0 && motivos.every((m) => m === "sem_estoque" || m === "estoque_insuficiente");
 }
 
+/**
+ * Põe os produtos de `ajustes_sugeridos` no estado da conversa, do mesmo jeito
+ * que os produtos com cartão. Sem isso o cliente dizia "quero 200 dessa" sobre
+ * um produto que só apareceu como ajuste, e o modelo, sem achar o id, buscava
+ * de novo e trazia outra coisa (dogfooding de 09/11, §3.2).
+ */
+function registrarAjustes(state: ConversationState, ajustes: Ajuste[]): void {
+  if (ajustes.length === 0) return;
+  const vistos = new Set<string>();
+  const opcoes: ConversationState["ultimasOpcoes"] = [];
+  for (const a of ajustes) {
+    if (vistos.has(a.produto_id)) continue;
+    vistos.add(a.produto_id);
+    discutirProduto(state, a.produto_id, a.nome);
+    if (a.subproduto_id) state.subprodutoParaProduto[a.subproduto_id] = a.produto_id;
+    opcoes.push({
+      id: a.produto_id,
+      nome: a.nome,
+      cores: a.subproduto_id ? [{ subproduto_id: a.subproduto_id, cor: a.cor ?? "" }] : [],
+    });
+  }
+  state.ultimasOpcoes = opcoes;
+}
+
 function guardarNecessidade(state: ConversationState, input: BuscarProdutosInput): void {
   const n = state.necessidade;
   if (input.ocasiao) n.ocasiao = input.ocasiao;
@@ -166,6 +190,10 @@ function formatar(r: Recomendacao, input: BuscarProdutosInput, state: Conversati
             "Diga que não encontrou e peça outras palavras ou o uso do brinde. Não sugira produto que não veio de uma ferramenta.",
         };
       }
+      // O produto do ajuste entra no estado como se tivesse sido mostrado: o "quero 200
+      // dessa" do dogfooding só achava produto em ultimasOpcoes, e o id do ajuste não
+      // estava lá — o modelo buscava de novo e trazia outro produto (#dogfooding 3.2).
+      registrarAjustes(state, r.ajustes);
       return {
         resultado: "nenhum_produto_encontrado",
         motivo: "regras_nao_fecham",
@@ -196,7 +224,8 @@ function formatar(r: Recomendacao, input: BuscarProdutosInput, state: Conversati
           produto_id: p.id,
           nome: p.nome,
           imagem_url: p.imagem_url,
-          quantidade: informada ? oferta.quantidade : undefined,
+          quantidade: oferta.quantidade,
+          no_minimo: !informada,
           cotadas: oferta.cores.slice(0, cotacoes.length).map((c, i) => ({ cor: c.cor, cotacao: cotacoes[i] })),
           outras: oferta.cores.slice(cotacoes.length).map((c) => c.cor),
         })
@@ -214,7 +243,7 @@ function formatar(r: Recomendacao, input: BuscarProdutosInput, state: Conversati
           ? {}
           : {
               aviso:
-                "O cliente não informou a quantidade, e o preço muda por faixa: não passe valor nenhum. Apresente as opções e pergunte a quantidade; depois chame buscar_produtos de novo com ela.",
+                "O cliente não informou a quantidade. Os cartões já saíram com o preço do PEDIDO MÍNIMO de cada produto, que muda por faixa: não cite nem recalcule valor nenhum. Apresente as opções e pergunte quantas unidades ele quer; depois chame buscar_produtos de novo com a quantidade.",
             }),
         produtos: r.itens.map(({ produto: p, oferta, ocasiaoConfere, cotacoes }) => {
           const exatos = cotacoes.filter((c): c is Cotacao => cotou(c) && c.centavos > 0).map((c) => c.centavos);
@@ -233,7 +262,11 @@ function formatar(r: Recomendacao, input: BuscarProdutosInput, state: Conversati
                   total_estimado: menor === null ? null : arredondar((menor * oferta.quantidade) / 100),
                   ...(corDoTotal ? { cor_do_total: corDoTotal } : {}),
                 }
-              : {}),
+              : {
+                  // Sem total: o cliente ainda não disse quantas unidades quer, e um total
+                  // no mínimo pareceria o valor do pedido dele.
+                  preco_unitario_no_pedido_minimo: menor === null ? null : menor / 100,
+                }),
             // Produto sem variação de cor vem com color "" da API.
             cores_disponiveis: oferta.cores.map((c) => c.cor).filter(Boolean),
             // O id da cor vai junto: sem ele, o modelo mandava o id do produto ao preparar_orcamento.
