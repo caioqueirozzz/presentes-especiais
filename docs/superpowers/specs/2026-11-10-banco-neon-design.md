@@ -5,7 +5,7 @@
 
 ## 1. Problema
 
-Todo o estado do agente fica em arquivos em `data/`: conversas, estado da ponte, lacunas, orçamentos de teste, índice de pedidos e índice do catálogo. O agente ainda não vai para a nuvem, mas vai quando estiver pronto e sem erros, e arquivo local não serve lá. O CRM do Dudu já usa um Postgres no Neon. A decisão de 06/11 é ter um banco só.
+Todo o estado do agente fica em arquivos em `data/`: conversas, estado da ponte, lacunas, orçamentos de teste, índice de pedidos e índice do catálogo. O agente ainda não vai para a nuvem, mas vai quando estiver pronto e sem erros, e arquivo local não serve lá. O CRM do Dudu já usa um Postgres no Neon. A decisão de 06/11 era ter um banco só. **Revista em 11/11:** o agente fica num projeto Neon próprio, separado do CRM. No Neon, o dono do banco (`neondb_owner`) é membro de `pg_read_all_data` e `pg_write_all_data`, e essa permissão não pode ser revogada. Num banco só, quem tivesse a credencial do CRM leria e alteraria as conversas e o estado do agente.
 
 ## 2. Objetivo e critérios de aceite
 
@@ -17,7 +17,7 @@ A fase está pronta quando **todos** passarem:
 2. Os testes atuais passam, e cada interface tem uma suíte de contrato que roda contra `Memory*` e contra `Pg*` (pglite).
 3. Os evals passam como antes (eles usam a loja mock e os stores em memória).
 4. Teste de fumaça contra o Docker: ponte + API, uma conversa, os dois processos reiniciados no meio, e a conversa, o modo e os eventos pendentes voltam como estavam.
-5. O usuário `agente` não lê nada fora do schema `agente`, e o usuário do CRM não lê o schema `agente`. Isso é conferido por SQL no Docker, com os mesmos papéis do Neon.
+5. O usuário `agente` não lê nada fora do schema `agente`, e o usuário do CRM não lê o schema `agente`. Isso é conferido por SQL no Docker, com os mesmos papéis do Neon. Em produção, o segundo sentido vem do projeto Neon separado (11/11).
 6. Nenhum log imprime a URL do banco, parâmetros de consulta ou conteúdo de conversa.
 
 ## 3. O que vai para onde
@@ -58,6 +58,7 @@ A fase está pronta quando **todos** passarem:
   - cria o usuário `agente`, dono do schema `agente`;
   - revoga do `agente` o acesso ao schema `public` (as tabelas do CRM);
   - revoga do usuário do CRM o acesso ao schema `agente`.
+- Desde 11/11, o script roda no projeto Neon do agente, e não no do CRM. A credencial de dono desse projeto não vai para nenhum servidor: o agente conecta só como `agente`.
 - O agente não toca nas tabelas do CRM. A ponte fala com o CRM só por HTTP (`/api/integracao/*`), como hoje.
 - A `AGENTE_DATABASE_URL` fica só no `.env` da raiz, separada da `DATABASE_URL` do CRM. O `.env.example` traz só o formato.
 - O Docker de dev cria os dois papéis (`agente` e um `crm` de teste) para o critério 5 ser conferido localmente.

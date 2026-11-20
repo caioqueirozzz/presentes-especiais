@@ -1,4 +1,4 @@
-import type { Banco } from "../db/banco.js";
+import { jsonb, type Banco } from "../db/banco.js";
 import { normalizarTelefone } from "./telefone.js";
 
 /*
@@ -96,7 +96,7 @@ export class PgModoLia implements ArmazemModoLia {
     await this.banco.query(
       `INSERT INTO agente.modo_lia (id, config, atualizado_em) VALUES (1, $1::jsonb, now())
        ON CONFLICT (id) DO UPDATE SET config = EXCLUDED.config, atualizado_em = now()`,
-      [JSON.stringify(completo)]
+      [jsonb(completo)]
     );
     return completo;
   }

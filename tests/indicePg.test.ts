@@ -1,8 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
 import type { Banco } from "../src/db/banco.js";
 import { bancoDeTeste } from "./helpers/bancoDeTeste.js";
-import { PgProductIndexStore } from "../src/catalogo/indicePg.js";
-import { indiceVazio, VERSAO_INDICE, type ProdutoIndexado } from "../src/catalogo/indice.js";
+import { IndiceMudouError, PgProductIndexStore } from "../src/catalogo/indicePg.js";
+import { indiceVazio, sincronizarCatalogo, VERSAO_INDICE, type ProdutoIndexado } from "../src/catalogo/indice.js";
+import { ClienteCatalogoFalso, produto as fixture } from "./helpers/produtos.js";
 
 const produto = (id: string, nome: string): ProdutoIndexado => ({
   id, slug: id, codigo: id, sku: id, nome, descricao: "", categorias: ["Canecas"], destaque: false,
@@ -29,7 +30,6 @@ describe("PgProductIndexStore", () => {
     const indice = { versao: VERSAO_INDICE, sincronizado_em: "2026-11-10T00:00:00.000Z", completo: true, produtos: [produto("a", "Caneca"), produto("b", "Squeeze")] };
     await s.salvar(indice);
     expect(await s.carregar()).toEqual(indice);
-    expect(await s.sincronizadoEm()).toBe("2026-11-10T00:00:00.000Z");
   });
 
   it("salvar tira quem não está mais no índice", async () => {
@@ -62,14 +62,70 @@ describe("PgProductIndexStore", () => {
     expect((await s.carregar()).produtos.map((p) => p.id)).toEqual(["a"]);
   });
 
-  it("ultimaGravacao muda a cada salvar, mesmo sem mudar o sincronizado_em (sync:precos)", async () => {
+  it("ultimaGravacao muda com o conteúdo ou quando um produto sai, não num salvar idêntico", async () => {
     banco = await bancoDeTeste();
     const s = new PgProductIndexStore(banco);
-    expect(await s.ultimaGravacao()).toBe("");
-    const indice = { versao: VERSAO_INDICE, sincronizado_em: "t", completo: true, produtos: [produto("a", "A")] };
-    await s.salvar(indice);
+    expect(await s.ultimaGravacao()).toBe(":0");
+    const base = { versao: VERSAO_INDICE, sincronizado_em: "t", completo: true };
+    await s.salvar({ ...base, produtos: [produto("a", "A"), produto("b", "B")] });
     const primeira = await s.ultimaGravacao();
-    await s.salvar(indice);
-    expect(await s.ultimaGravacao()).not.toBe(primeira);
+    await s.salvar({ ...base, sincronizado_em: "t2", produtos: [produto("a", "A"), produto("b", "B")] });
+    expect(await s.ultimaGravacao()).toBe(primeira);
+    await s.salvar({ ...base, produtos: [produto("a", "A"), produto("b", "B2")] });
+    const segunda = await s.ultimaGravacao();
+    expect(segunda).not.toBe(primeira);
+    await s.salvar({ ...base, produtos: [produto("a", "A")] });
+    expect(await s.ultimaGravacao()).not.toBe(segunda);
+  });
+
+  it("dois salvar a partir da mesma leitura: o 2º recebe IndiceMudouError e o banco fica com o 1º", async () => {
+    banco = await bancoDeTeste();
+    const base = { versao: VERSAO_INDICE, sincronizado_em: "t", completo: true };
+    await new PgProductIndexStore(banco).salvar({ ...base, produtos: [produto("a", "A")] });
+    const s1 = new PgProductIndexStore(banco);
+    const s2 = new PgProductIndexStore(banco);
+    const e1 = await s1.ultimaGravacao();
+    const e2 = await s2.ultimaGravacao();
+    await s1.salvar({ ...base, produtos: [produto("a", "do 1º")] }, { esperada: e1 });
+    await expect(s2.salvar({ ...base, produtos: [produto("a", "do 2º")] }, { esperada: e2 })).rejects.toBeInstanceOf(IndiceMudouError);
+    expect((await s1.carregar()).produtos.map((p) => p.nome)).toEqual(["do 1º"]);
+  });
+
+  it("um carregar() no mesmo store entre a leitura e o salvar não esconde a gravação de outro processo", async () => {
+    banco = await bancoDeTeste();
+    const base = { versao: VERSAO_INDICE, sincronizado_em: "t", completo: true };
+    await new PgProductIndexStore(banco).salvar({ ...base, produtos: [produto("a", "A")] });
+    const s = new PgProductIndexStore(banco);
+    const esperada = await s.ultimaGravacao();
+    await s.carregar();
+    await new PgProductIndexStore(banco).salvar({ ...base, produtos: [produto("a", "de fora")] });
+    await s.carregar(); // getIndice/recarregar no meio do sync
+    await expect(s.salvar({ ...base, produtos: [produto("a", "do sync")] }, { esperada })).rejects.toBeInstanceOf(IndiceMudouError);
+    expect((await s.carregar()).produtos.map((p) => p.nome)).toEqual(["de fora"]);
+  });
+
+  it("sincronizarCatalogo: carregar() no meio do sync não evita o IndiceMudouError", async () => {
+    banco = await bancoDeTeste();
+    const base = { versao: VERSAO_INDICE, sincronizado_em: "t", completo: true };
+    const s = new PgProductIndexStore(banco);
+    await s.salvar({ ...base, produtos: [produto("a", "A")] });
+    const client = new ClienteCatalogoFalso([fixture({ id: "a", nome: "A", atualizadoEm: "2026-11-02" })]);
+    const lerDetalhe = client.getProduct.bind(client);
+    client.getProduct = async (id: string) => {
+      await new PgProductIndexStore(banco!).salvar({ ...base, produtos: [produto("a", "de fora")] });
+      await s.carregar();
+      return lerDetalhe(id);
+    };
+    await expect(sincronizarCatalogo(client, s)).rejects.toBeInstanceOf(IndiceMudouError);
+    expect((await s.carregar()).produtos.map((p) => p.nome)).toEqual(["de fora"]);
+  });
+
+  it("salvar sem `esperada` (primeira carga) é permitido, e o mesmo store segue podendo salvar", async () => {
+    banco = await bancoDeTeste();
+    const s = new PgProductIndexStore(banco);
+    const base = { versao: VERSAO_INDICE, sincronizado_em: "t", completo: true };
+    await s.salvar({ ...base, produtos: [produto("a", "A")] });
+    await s.salvar({ ...base, produtos: [produto("a", "A2")] });
+    expect((await s.carregar()).produtos.map((p) => p.nome)).toEqual(["A2"]);
   });
 });

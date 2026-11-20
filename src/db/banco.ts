@@ -18,8 +18,17 @@ export interface Banco extends Executor {
 const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), "../../db/migrations");
 const LOCAIS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
+/** Serializa para coluna jsonb: o Postgres recusa \u0000 em texto jsonb (22P05). */
+export const jsonb = (v: unknown): string => JSON.stringify(v, (_k, x) => (typeof x === "string" ? x.replaceAll("\u0000", "") : x));
+
 export function exigirSsl(url: string): void {
-  const u = new URL(url);
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    // Sem a causa: o TypeError traz a URL inteira, com a senha.
+    throw new Error("AGENTE_DATABASE_URL inválida (caractere especial na senha precisa de percent-encoding).");
+  }
   const ssl = u.searchParams.get("sslmode");
   if (!LOCAIS.has(u.hostname) && ssl !== "require" && ssl !== "verify-full") {
     throw new Error("AGENTE_DATABASE_URL fora do localhost precisa de sslmode=require.");

@@ -4,7 +4,7 @@ import { MSG_SUSPENSO } from "../operacao/verificacaoAmbiente.js";
 import { exigirAmbiente } from "../operacao/exigirAmbiente.js";
 import { PgConversas } from "../conversas/armazem.js";
 import { lerEstadoSistema, ligarEstadoSistema } from "../controle/estadoSistema.js";
-import { abrirBanco } from "../db/banco.js";
+import { abrirBanco, logarErroBanco } from "../db/banco.js";
 import { criarClienteHttp } from "./agenteHttp.js";
 import { iniciarControle } from "./controle.js";
 import { ObservadorCrm } from "./crm.js";
@@ -71,6 +71,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error("Falha:", logarErroBanco(err));
   process.exit(1);
 });

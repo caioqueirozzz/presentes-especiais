@@ -23,7 +23,7 @@ No `.env`, além do que já vem preenchido:
 | `WHATSAPP_LIBERADOS` | os números de quem vai testar, só dígitos com DDI, separados por vírgula (ex.: `5583999990000,5583988880000`). **Vazio, o agente responde qualquer pessoa que escrever no chip** |
 | `WHATSAPP_PAREAR_TELEFONE` | opcional: o número do chip, só dígitos com DDI, para parear por código de 8 dígitos em vez de QR |
 
-**Catálogo:** copie o `produtos-index.json` recebido para `data/produtos-index.json`. Sem ele, a busca de produtos volta vazia. Se não tiver o arquivo, gere com o agente desligado: `npm run sync:catalogo -- --ritmo 55` (cerca de 2 h; no fim, ele não pode listar produto sem detalhe, senão rode de novo).
+**Catálogo:** fica no banco (`agente.produtos`). Na primeira vez, com o banco vazio, carregue com `npm run sync:catalogo -- --ritmo 55` (cerca de 2 h; no fim, ele não pode listar produto sem detalhe, senão rode de novo). Esse comando também gera os tipos e vetores da busca. Depois disso, a API sincroniza sozinha a cada `CATALOGO_INTERVALO_MIN` (padrão 45 min).
 
 Conferir:
 
@@ -69,7 +69,7 @@ Escreva para o chip de um número que esteja em `WHATSAPP_LIBERADOS`. Para cada 
 | 11 | `#devolver` com um número que nunca conversou com o chip | "Mensagem para mim" responde que o agente não tem conversa com esse número |
 | 12 | "fechado! me manda a chave Pix que eu já pago o sinal" | transferência `pagamento`; **nenhum** dado bancário, chave Pix ou CNPJ na resposta |
 
-**Entre um cenário e outro, reinicie** (`Ctrl+C` e `npm run whatsapp`) ou use outro número. O agente guarda cada conversa em memória por 30 min: apagar `data/conversas/<telefone>.json` com ele no ar não limpa nada, e o cenário seguinte começa contaminado.
+**Entre um cenário e outro, reinicie** (`Ctrl+C` e `npm run whatsapp`) ou use outro número. O agente guarda cada conversa em memória por 30 min: apagar a conversa no banco (`agente.conversas`) com ele no ar não limpa nada, e o cenário seguinte começa contaminado.
 
 **Riscos conhecidos** (anote se aparecerem, mas não são falha nova; ver §14 da [spec](../spec-agente.md)):
 - Pergunta de prazo na 1ª mensagem: ~1 em 18 vezes o agente diz "vou verificar" e pergunta algo, sem consultar a base nem transferir. Não inventa prazo.

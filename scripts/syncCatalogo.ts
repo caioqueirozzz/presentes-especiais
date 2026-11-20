@@ -16,6 +16,7 @@
 import "dotenv/config";
 import { createBrindeMeClient } from "../src/integrations/brindeme/factory.js";
 import { abrirCatalogoHttp } from "../src/catalogo/abrir.js";
+import { IndiceMudouError } from "../src/catalogo/indicePg.js";
 import { sincronizarCatalogo } from "../src/catalogo/indice.js";
 import { config } from "../src/config.js";
 
@@ -45,62 +46,70 @@ async function main() {
   );
 
   const { store, fechar } = await abrirCatalogoHttp("sync:catalogo");
-  const client = createBrindeMeClient({ reqPorMinuto: ritmo });
-  const inicio = Date.now();
-  let ultimaLinha = "";
+  try {
+    const client = createBrindeMeClient({ reqPorMinuto: ritmo });
+    const inicio = Date.now();
+    let ultimaLinha = "";
 
-  const r = await sincronizarCatalogo(client, store, {
-    concorrencia,
-    maxPaginas,
-    forcar,
-    maxIdadeHoras: config.catalogo.maxIdadeHoras,
-    onProgresso: (e) => {
-      const linha =
-        e.fase === "listagem"
-          ? `  listando… ${e.feitos}${e.total ? ` de ${e.total}` : ""}`
-          : `  lendo detalhes… ${e.feitos} de ${e.total}`;
-      if (process.stdout.isTTY && linha !== ultimaLinha) {
-        process.stdout.write(`\r${GRAY}${linha}${RESET}   `);
-        ultimaLinha = linha;
-      }
-    },
-  });
-  if (process.stdout.isTTY) process.stdout.write("\r" + " ".repeat(60) + "\r");
+    const r = await sincronizarCatalogo(client, store, {
+      concorrencia,
+      maxPaginas,
+      forcar,
+      maxIdadeHoras: config.catalogo.maxIdadeHoras,
+      onProgresso: (e) => {
+        const linha =
+          e.fase === "listagem"
+            ? `  listando… ${e.feitos}${e.total ? ` de ${e.total}` : ""}`
+            : `  lendo detalhes… ${e.feitos} de ${e.total}`;
+        if (process.stdout.isTTY && linha !== ultimaLinha) {
+          process.stdout.write(`\r${GRAY}${linha}${RESET}   `);
+          ultimaLinha = linha;
+        }
+      },
+    });
+    if (process.stdout.isTTY) process.stdout.write("\r" + " ".repeat(60) + "\r");
 
-  const segundos = ((Date.now() - inicio) / 1000).toFixed(1);
-  console.log(`${GREEN}✓${RESET} ${r.listados} produto(s) listado(s) em ${r.paginas} página(s), ${r.ativos} ativo(s)`);
-  console.log(
-    `${GRAY}  detalhe lido: ${r.lidosNoDetalhe} · reaproveitados: ${r.reaproveitados} · novos: ${r.novos} · removidos: ${r.removidos}${RESET}`
-  );
-  console.log(`${GRAY}  ${segundos}s${RESET}`);
-
-  if (!r.listagemCompleta) {
+    const segundos = ((Date.now() - inicio) / 1000).toFixed(1);
+    console.log(`${GREEN}✓${RESET} ${r.listados} produto(s) listado(s) em ${r.paginas} página(s), ${r.ativos} ativo(s)`);
     console.log(
-      `${YELLOW}!${RESET} listagem cortada em ${maxPaginas} páginas: nada foi removido do índice. Aumente --max-paginas.`
+      `${GRAY}  detalhe lido: ${r.lidosNoDetalhe} · reaproveitados: ${r.reaproveitados} · novos: ${r.novos} · removidos: ${r.removidos}${RESET}`
     );
-  }
-  if (r.falhas.length > 0) {
-    console.log(`${YELLOW}!${RESET} ${r.falhas.length} produto(s) sem detalhe (registro anterior mantido):`);
-    for (const f of r.falhas.slice(0, 10)) console.log(`${GRAY}    ${f.id}: ${f.erro}${RESET}`);
-    if (r.falhas.length > 10) console.log(`${GRAY}    … e mais ${r.falhas.length - 10}${RESET}`);
-    console.log(`${YELLOW}!${RESET} índice marcado incompleto. Rode de novo: só os que faltaram são lidos.`);
-  }
+    console.log(`${GRAY}  ${segundos}s${RESET}`);
 
-  // Produto novo sem tipo e sem vetor fica de fora do filtro da busca semântica até a
-  // próxima geração, por isso ela vem logo atrás do sync (spec §3.3). Só o que mudou é
-  // regerado, então o custo é de centavos. `--sem-vetores` pula.
-  if (process.argv.includes("--sem-vetores")) return;
-  console.log("");
-  const { gerarEImprimir } = await import("./gerarVetores.js");
-  // A trava de 5% não invalida o sync: o índice novo já está gravado e vale. Mas a
-  // busca segue com os vetores anteriores, e quem chamou precisa saber disso.
-  if (!(await gerarEImprimir())) {
-    console.log(`${YELLOW}!${RESET} índice atualizado, tipos e vetores NÃO. A busca semântica segue com os anteriores.`);
-    process.exitCode = 1;
+    if (!r.listagemCompleta) {
+      console.log(
+        `${YELLOW}!${RESET} listagem cortada em ${maxPaginas} páginas: nada foi removido do índice. Aumente --max-paginas.`
+      );
+    }
+    if (r.falhas.length > 0) {
+      console.log(`${YELLOW}!${RESET} ${r.falhas.length} produto(s) sem detalhe (registro anterior mantido):`);
+      for (const f of r.falhas.slice(0, 10)) console.log(`${GRAY}    ${f.id}: ${f.erro}${RESET}`);
+      if (r.falhas.length > 10) console.log(`${GRAY}    … e mais ${r.falhas.length - 10}${RESET}`);
+      console.log(`${YELLOW}!${RESET} índice marcado incompleto. Rode de novo: só os que faltaram são lidos.`);
+    }
+
+    // Produto novo sem tipo e sem vetor fica de fora do filtro da busca semântica até a
+    // próxima geração, por isso ela vem logo atrás do sync (spec §3.3). Só o que mudou é
+    // regerado, então o custo é de centavos. `--sem-vetores` pula.
+    if (process.argv.includes("--sem-vetores")) return;
+    console.log("");
+    const { gerarEImprimir } = await import("./gerarVetores.js");
+    // A trava de 5% não invalida o sync: o índice novo já está gravado e vale. Mas a
+    // busca segue com os vetores anteriores, e quem chamou precisa saber disso.
+    if (!(await gerarEImprimir())) {
+      console.log(`${YELLOW}!${RESET} índice atualizado, tipos e vetores NÃO. A busca semântica segue com os anteriores.`);
+      process.exitCode = 1;
+    }
+  } finally {
+    await fechar();
   }
 }
 
 main().catch((err) => {
+  if (err instanceof IndiceMudouError) {
+    console.error(`${RED}✗${RESET} o índice mudou durante a execução e nada foi gravado. Rode npm run sync:catalogo de novo.`);
+    process.exit(1);
+  }
   console.error(`${RED}✗${RESET} sincronização abortada, índice anterior preservado: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });

@@ -10,7 +10,9 @@ import "dotenv/config";
 import { config } from "../src/config.js";
 import { abrirCatalogoHttp } from "../src/catalogo/abrir.js";
 import { FRACAO_MAXIMA_DE_FALHAS, sincronizarPrecos } from "../src/catalogo/syncPrecos.js";
+import { IndiceMudouError } from "../src/catalogo/indicePg.js";
 import { PrecoVendaHttp } from "../src/integrations/brindeme/precoVenda.js";
+import { logarErroBanco } from "../src/db/banco.js";
 
 function numero(nome: string, padrao: number): number {
   const i = process.argv.indexOf(`--${nome}`);
@@ -53,6 +55,10 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(err);
+  if (err instanceof IndiceMudouError) {
+    console.error("O índice mudou durante a execução e nada foi gravado. Rode npm run sync:precos de novo.");
+    process.exit(1);
+  }
+  console.error("Falha:", logarErroBanco(err));
   process.exit(1);
 });

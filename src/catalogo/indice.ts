@@ -88,7 +88,10 @@ export interface ProductIndexStore {
    * guarda o índice BM25 por referência para não reconstruí-lo a cada pergunta.
    */
   carregar(): Promise<IndiceCatalogo>;
-  salvar(indice: IndiceCatalogo): Promise<void>;
+  /** `esperada`: assinatura (`ultimaGravacao`) lida antes de carregar; o store do banco recusa se mudou. */
+  salvar(indice: IndiceCatalogo, opcoes?: { esperada?: string }): Promise<void>;
+  /** Só o store do banco tem; sem ele não há o que comparar. */
+  ultimaGravacao?(): Promise<string>;
 }
 
 export class MemoryProductIndexStore implements ProductIndexStore {
@@ -232,6 +235,7 @@ export async function sincronizarCatalogo(
   }
   const paginas = Math.min(pagina, maxPaginas);
 
+  const esperada = await store.ultimaGravacao?.();
   const anteriores = new Map((await store.carregar()).produtos.map((p) => [p.id, p]));
   const ativos = [...listados.values()].filter((p) => p.status);
 
@@ -311,7 +315,7 @@ export async function sincronizarCatalogo(
     sincronizado_em: agora.toISOString(),
     completo,
     produtos: [...resultado.values()],
-  });
+  }, { esperada });
 
   return {
     paginas,

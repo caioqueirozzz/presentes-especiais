@@ -1,4 +1,4 @@
-import type { Banco, Executor } from "../db/banco.js";
+import { jsonb, type Banco, type Executor } from "../db/banco.js";
 import { phoneMatches } from "../agent/state.js";
 import { estadoVazio, normalizarEstadoPonte, type EstadoPonte } from "../whatsapp/estadoPonte.js";
 
@@ -8,6 +8,8 @@ export interface PlanoBanco {
   telefones: string[];
   conversaIds: string[];
   lacunas: number;
+  /** Conversas separadas por estarem ilegíveis (agente.conversas_corrompidas). */
+  corrompidas: number;
   registrosPonte: number;
   /** Pedido de um cliente: o telefone sai da ponte mesmo sem conversa. */
   telefoneCliente?: string;
@@ -47,12 +49,13 @@ function limite(dias: number, agora: number): Date {
   return new Date(agora - dias * DIA_MS);
 }
 
-async function montar(banco: Executor, linhas: Array<{ telefone: string; conversa_id: string | null }>, lacunas: number): Promise<PlanoBanco> {
+async function montar(banco: Executor, linhas: Array<{ telefone: string; conversa_id: string | null }>, lacunas: number, corrompidas: number): Promise<PlanoBanco> {
   const telefones = linhas.map((l) => l.telefone);
   return {
     telefones,
     conversaIds: linhas.map((l) => l.conversa_id).filter((c): c is string => !!c),
     lacunas,
+    corrompidas,
     registrosPonte: telefones.length ? tirarTelefonesDoEstadoPonte((await estadoPonte(banco)) ?? estadoVazio(), telefones).registros : 0,
   };
 }
@@ -64,7 +67,8 @@ export async function planejarPorIdade(banco: Banco, dias: number, agora = Date.
     [corte]
   );
   const [{ n }] = await banco.query<{ n: number }>("SELECT count(*)::int AS n FROM agente.lacunas WHERE registrado_em < $1", [corte]);
-  return montar(banco, linhas, n);
+  const [{ c }] = await banco.query<{ c: number }>("SELECT count(*)::int AS c FROM agente.conversas_corrompidas WHERE separado_em < $1", [corte]);
+  return montar(banco, linhas, n, c);
 }
 
 export async function planejarCliente(banco: Banco, telefone: string): Promise<PlanoBanco> {
@@ -75,7 +79,8 @@ export async function planejarCliente(banco: Banco, telefone: string): Promise<P
   );
   const ids = linhas.map((l) => l.conversa_id).filter((c): c is string => !!c);
   const [{ n }] = await banco.query<{ n: number }>("SELECT count(*)::int AS n FROM agente.lacunas WHERE conversa_id = ANY($1::text[])", [ids]);
-  const plano = await montar(banco, linhas, n);
+  const [{ c }] = await banco.query<{ c: number }>("SELECT count(*)::int AS c FROM agente.conversas_corrompidas WHERE telefone = $1", [telefone]);
+  const plano = await montar(banco, linhas, n, c);
   // O estado da ponte guarda o telefone mesmo sem conversa: o cliente sai de lá também.
   const registrosPonte = tirarTelefonesDoEstadoPonte((await estadoPonte(banco)) ?? estadoVazio(), [telefone]).registros;
   return { ...plano, registrosPonte, telefoneCliente: telefone };
@@ -96,11 +101,13 @@ export async function executarPlano(banco: Banco, plano: PlanoBanco, porIdade: {
       : await tx.query<{ telefone: string }>("DELETE FROM agente.conversas WHERE telefone = ANY($1::text[]) RETURNING telefone", [plano.telefones]);
     if (corte) await tx.query("DELETE FROM agente.lacunas WHERE registrado_em < $1", [corte]);
     else await tx.query("DELETE FROM agente.lacunas WHERE conversa_id = ANY($1::text[])", [plano.conversaIds]);
+    if (corte) await tx.query("DELETE FROM agente.conversas_corrompidas WHERE separado_em < $1", [corte]);
+    else if (plano.telefoneCliente) await tx.query("DELETE FROM agente.conversas_corrompidas WHERE telefone = $1", [plano.telefoneCliente]);
     const saem = corte ? apagadas.map((r) => r.telefone) : plano.telefoneCliente ? [plano.telefoneCliente] : [];
     if (saem.length === 0) return;
     const atual = await estadoPonte(tx, true);
     if (!atual) return; // ilegível ou ausente: não sobrescreve
     const { estado, registros } = tirarTelefonesDoEstadoPonte(atual, saem);
-    if (registros > 0) await tx.query("UPDATE agente.estado_ponte SET doc = $1::jsonb, atualizado_em = now() WHERE id = 1", [JSON.stringify(estado)]);
+    if (registros > 0) await tx.query("UPDATE agente.estado_ponte SET doc = $1::jsonb, atualizado_em = now() WHERE id = 1", [jsonb(estado)]);
   });
 }

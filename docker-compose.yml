@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: agente
     ports:
-      - "5440:5432"
+      - "127.0.0.1:5440:5432"
     mem_limit: 256m
     volumes:
       - agente-banco:/var/lib/postgresql/data

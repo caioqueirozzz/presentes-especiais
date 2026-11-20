@@ -254,6 +254,25 @@ describe("Atendimento", () => {
     expect(paraMim?.texto).toContain("⏸️ Agente suspenso");
   });
 
+  it("#suspender com o banco fora: avisa o operador, não confirma e não lança", async () => {
+    const canal = new WhatsAppFalso();
+    const envio = new Envio(canal, 20);
+    const controle: ControleAgente = {
+      suspender: vi.fn().mockRejectedValue(new Error("connection refused")),
+      retomar: vi.fn(),
+      desligar: vi.fn(),
+      religar: vi.fn(),
+    };
+    const atendimento = new Atendimento(new AgenteFalso(), envio, () => {}, { controle });
+
+    await atendimento.receberMinha(canal.mensagem({ chatId: canal.eu, texto: "#suspender", deMim: true, paraMim: true }));
+    await vi.runAllTimersAsync();
+
+    const [paraMim] = canal.enviadas.filter((e) => e.chatId === canal.eu);
+    expect(paraMim?.texto).toContain("Não consegui gravar");
+    expect(paraMim?.texto).not.toContain("Agente suspenso");
+  });
+
   it("#retomar: chama controle.retomar e confirma", async () => {
     const canal = new WhatsAppFalso();
     const agente = new AgenteFalso();

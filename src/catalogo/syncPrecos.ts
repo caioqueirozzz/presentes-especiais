@@ -118,6 +118,9 @@ function aplicar(atual: IndiceCatalogo, novo: IndiceCatalogo): IndiceCatalogo {
 export async function sincronizarPrecos(store: ProductIndexStore, consultar: ConsultaPreco, opcoes: OpcoesSyncPrecos = {}): Promise<ResultadoSyncPrecos> {
   const r = await recalcularPrecos(await store.carregar(), consultar, opcoes);
   const gravou = r.grupos > 0 && r.falhas.length / r.grupos <= FRACAO_MAXIMA_DE_FALHAS;
-  if (gravou) await store.salvar(aplicar(await store.carregar(), r.indice));
+  if (gravou) {
+    const esperada = await store.ultimaGravacao?.();
+    await store.salvar(aplicar(await store.carregar(), r.indice), { esperada });
+  }
   return { grupos: r.grupos, atualizados: r.atualizados, semPreco: r.semPreco, falhas: r.falhas, gravou };
 }

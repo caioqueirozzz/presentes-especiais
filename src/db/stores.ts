@@ -5,7 +5,7 @@ import type { Banco } from "./banco.js";
 import { PgLacunaStore } from "../knowledge/lacunas.js";
 import { PgOrderIndexStore } from "../integrations/brindeme/orderIndex.js";
 import { MotorSemantico } from "../catalogo/semantica.js";
-import { gerarTiposEVetores } from "../catalogo/geracao.js";
+import { gerarTiposEVetores, type DependenciasGeracao } from "../catalogo/geracao.js";
 import { PgTipoStore, PgVectorStore } from "../catalogo/vetoresPg.js";
 import { MemoryTipoStore } from "../catalogo/tipos.js";
 import { MemoryVectorStore } from "../catalogo/vetores.js";
@@ -27,19 +27,34 @@ export function ligarStores(banco: Banco, modo: "mock" | "http" = config.brindeM
 
 /**
  * Liga a busca semântica. Sem OPENAI_API_KEY não há motor e a busca fica no BM25.
- * Em http os vetores vêm do banco; em mock são gerados na partida sobre os fixtures, só em memória.
+ * Em http os vetores vêm do banco e as dependências da geração voltam; em mock são gerados na partida sobre os fixtures, só em memória.
  */
-export async function ligarSemantica(banco: Banco | null, catalogo: ProductIndexStore, modo: "mock" | "http" = config.brindeMe.mode): Promise<void> {
+export async function ligarSemantica(
+  banco: Banco | null,
+  catalogo: ProductIndexStore,
+  modo: "mock" | "http" = config.brindeMe.mode
+): Promise<DependenciasGeracao | null> {
   const chave = config.openaiApiKey;
-  if (!chave) return setMotorSemantico(null);
+  if (!chave) {
+    setMotorSemantico(null);
+    return null;
+  }
   const embeddings = clienteEmbeddingsPadrao(chave);
   if (modo === "http") {
     if (!banco) throw new Error("ligarSemantica em http precisa do banco");
-    return setMotorSemantico(
-      new MotorSemantico({ vetoresProduto: new PgVectorStore(banco, "produto"), vetoresTipo: new PgVectorStore(banco, "tipo"), tipos: new PgTipoStore(banco), embeddings })
-    );
+    // Os mesmos stores servem à busca e à geração do ciclo de sync: o `salvar` de um renova o cache do outro.
+    const deps = {
+      tipos: new PgTipoStore(banco),
+      vetoresProduto: new PgVectorStore(banco, "produto"),
+      vetoresTipo: new PgVectorStore(banco, "tipo"),
+      embeddings,
+      rotulos: clienteRotuloPadrao(chave),
+    };
+    setMotorSemantico(new MotorSemantico(deps));
+    return deps;
   }
   const deps = { tipos: new MemoryTipoStore(), vetoresProduto: new MemoryVectorStore(), vetoresTipo: new MemoryVectorStore() };
   await gerarTiposEVetores((await catalogo.carregar()).produtos, { ...deps, embeddings, rotulos: clienteRotuloPadrao(chave) });
   setMotorSemantico(new MotorSemantico({ ...deps, embeddings }));
+  return null;
 }

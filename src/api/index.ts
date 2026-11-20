@@ -3,9 +3,11 @@ import { config, conferirPrazos } from "../config.js";
 import { criarServidorAgente } from "../contrato/servidorHttp.js";
 import { PgConversas } from "../conversas/armazem.js";
 import { lerEstadoSistema, ligarEstadoSistema } from "../controle/estadoSistema.js";
-import { abrirBanco } from "../db/banco.js";
+import { abrirBanco, logarErroBanco } from "../db/banco.js";
 import { ligarSemantica, ligarStores } from "../db/stores.js";
 import { RepositorioConversas } from "../conversas/repositorio.js";
+import { criarCicloSync } from "../catalogo/cicloSync.js";
+import { gerarTiposEVetores } from "../catalogo/geracao.js";
 import { sincronizarCatalogo } from "../catalogo/indice.js";
 import { PgProductIndexStore } from "../catalogo/indicePg.js";
 import { createBrindeMeClient } from "../integrations/brindeme/factory.js";
@@ -23,7 +25,6 @@ async function main(): Promise<void> {
   const banco = await abrirBanco();
   await ligarEstadoSistema(banco);
   const store = ligarStores(banco);
-  exigirAmbiente("agente", process.env, (await store.carregar()).produtos.length);
   if (lerEstadoSistema().suspenso) console.warn(`! estado-sistema: ${MSG_SUSPENSO}`);
   const prazos = conferirPrazos(config.agente.tetoMs, config.whatsapp.agenteTimeoutMs);
   if (prazos) {
@@ -40,47 +41,44 @@ async function main(): Promise<void> {
   const client = createBrindeMeClient();
   console.log(`API da loja: ${config.brindeMe.mode}`);
   await avisarConhecimentoECatalogo(client, store);
-  await ligarSemantica(banco, store);
+  // Em mock o índice só nasce no `avisarConhecimentoECatalogo`: contar antes dele daria "vazio" falso.
+  const produtosNoIndice = (await store.carregar()).produtos.length;
+  exigirAmbiente("agente", process.env, produtosNoIndice);
+  const semantica = await ligarSemantica(banco, store);
 
-  if ((await store.carregar()).produtos.length === 0) {
+  if (produtosNoIndice === 0) {
     console.error("Índice do catálogo vazio: o agente não sobe sem ele. Rode antes: npm run sync:catalogo (a 1ª carga leva minutos).");
     process.exit(1);
   }
 
+  // Tudo em memória antes do 1º turno: do Neon longe, a carga leva mais que o teto do turno.
+  const inicioCarga = Date.now();
+  await Promise.all([recarregarIndice(), semantica?.tipos.carregar(), semantica?.vetoresProduto.carregar(), semantica?.vetoresTipo.carregar()]);
+  console.log(`Catálogo e vetores em memória em ${Math.round((Date.now() - inicioCarga) / 1000)} s`);
+
   // Cliente próprio: falhas do sync abrem o disjuntor dele, não o das conversas.
   const clienteDoSync = createBrindeMeClient({ reqPorMinuto: config.catalogo.reqPorMinuto });
-  let gravacaoVista = store instanceof PgProductIndexStore ? await store.ultimaGravacao() : "";
-  const sincronizar = () =>
-    sincronizarCatalogo(clienteDoSync, store, {
-      concorrencia: Math.min(config.catalogo.concorrencia, CONCORRENCIA_MAX_DO_SYNC),
-      maxIdadeHoras: config.catalogo.maxIdadeHoras,
-    })
-      .then(async (r) => {
-        console.log(`Catálogo sincronizado: ${r.ativos} ativos, ${r.novos} novos, ${r.removidos} removidos${r.completo ? "" : " (incompleto)"}`);
-        await recarregarIndice();
-        if (store instanceof PgProductIndexStore) gravacaoVista = await store.ultimaGravacao();
-      })
-      .catch((err) =>
-        console.error(`Sync do catálogo falhou; o índice anterior continua valendo: ${err instanceof Error ? err.message : err}`)
-      );
+  const pg = store instanceof PgProductIndexStore ? store : null;
+  const ciclo = criarCicloSync(
+    {
+      sincronizar: () =>
+        sincronizarCatalogo(clienteDoSync, store, {
+          concorrencia: Math.min(config.catalogo.concorrencia, CONCORRENCIA_MAX_DO_SYNC),
+          maxIdadeHoras: config.catalogo.maxIdadeHoras,
+        }),
+      recarregar: recarregarIndice,
+      assinatura: pg ? () => pg.ultimaGravacao() : undefined,
+      gerar: semantica ? (indice) => gerarTiposEVetores(indice.produtos, semantica) : undefined,
+      log: (l) => console.error(l),
+    },
+    pg ? await pg.ultimaGravacao() : ""
+  );
   // Só com a API real: em mock, o sync gravaria os produtos de teste dentro do índice real.
   if (config.brindeMe.mode === "http") {
-    void sincronizar();
-    setInterval(() => void sincronizar(), config.catalogo.intervaloMin * 60_000);
+    void ciclo.executar();
+    setInterval(() => void ciclo.executar(), config.catalogo.intervaloMin * 60_000);
   }
-  // Quem grava por fora (sync:precos noturno) não avisa a API: ela confere o banco a cada 5 min.
-  if (store instanceof PgProductIndexStore) {
-    setInterval(() => {
-      void store
-        .ultimaGravacao()
-        .then(async (g) => {
-          if (g === gravacaoVista) return;
-          await recarregarIndice();
-          gravacaoVista = g;
-        })
-        .catch((err) => console.error(`Releitura do catálogo falhou; o índice em uso continua: ${err instanceof Error ? err.message : err}`));
-    }, CINCO_MIN_MS);
-  }
+  if (pg) setInterval(() => void ciclo.conferirGravacaoExterna(), CINCO_MIN_MS);
 
   const log = (e: Record<string, unknown>) => console.error(JSON.stringify(e));
   const agente = new AgenteDefinitivo({
@@ -96,6 +94,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error("Falha:", logarErroBanco(err));
   process.exit(1);
 });

@@ -4,7 +4,7 @@ import type { Agente } from "../contrato/agente.js";
 import { criarServidorAgente } from "../contrato/servidorHttp.js";
 import { createBrindeMeClient } from "../integrations/brindeme/factory.js";
 import { criarLLM } from "../llm/index.js";
-import { abrirBanco } from "../db/banco.js";
+import { abrirBanco, logarErroBanco } from "../db/banco.js";
 import { ligarSemantica, ligarStores } from "../db/stores.js";
 import { ligarEstadoSistema } from "../controle/estadoSistema.js";
 import { exigirAmbiente } from "../operacao/exigirAmbiente.js";
@@ -26,10 +26,10 @@ async function main(): Promise<void> {
     const banco = await abrirBanco();
     await ligarEstadoSistema(banco);
     const catalogo = ligarStores(banco);
-    exigirAmbiente("agente", process.env, (await catalogo.carregar()).produtos.length);
     const client = createBrindeMeClient();
     console.log(`API da loja: ${config.brindeMe.mode}`);
     await avisarConhecimentoECatalogo(client, catalogo);
+    exigirAmbiente("agente", process.env, (await catalogo.carregar()).produtos.length);
     await ligarSemantica(banco, catalogo);
     agente = new AgenteDireto(criarLLM(), client);
   } else {
@@ -43,6 +43,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error("Falha:", logarErroBanco(err));
   process.exit(1);
 });

@@ -12,7 +12,7 @@ Cliente no WhatsApp ──► chip da loja ──► PONTE (whatsapp-web.js) ─
                          "Mensagem para mim" (avisos e comandos)          API da loja (catálogo, pedidos, orçamentos)
 ```
 
-- **Agente** (`src/api`): decide a resposta, chama as ferramentas e guarda a conversa em `data/conversas/<telefone>.json`.
+- **Agente** (`src/api`): decide a resposta, chama as ferramentas e guarda a conversa no banco (`agente.conversas`).
 - **Ponte** (`src/whatsapp`): recebe e envia no WhatsApp, junta mensagens seguidas num lote só e lê os comandos `#…`.
 - **"Mensagem para mim"** (a conversa do chip consigo mesmo) é o **painel do supervisor**: lá chegam as transferências e os avisos, e de lá saem os comandos.
 - O que o agente **nunca** faz sozinho: dar desconto, confirmar pagamento, prometer prazo fora da base aprovada, mostrar pedido sem validar o telefone ou o e-mail, criar orçamento sem o "pode criar" do cliente.
@@ -162,17 +162,17 @@ npm run relatorio:piloto -- --desde 2026-10-20 --saida docs/fase-6/piloto-semana
 
 | Onde | O quê |
 |---|---|
-| `data/conversas/<telefone>.json` | Histórico, dados do cliente, orçamentos da conversa |
+| `agente.conversas` (banco) | Histórico, dados do cliente, orçamentos da conversa; ilegíveis vão para `agente.conversas_corrompidas` |
 | `data/artes/<telefone>/` | Artes enviadas |
 | `logs/<conversaId>.jsonl` | Log de cada turno (mascarado) |
-| `data/lacunas.jsonl` | Perguntas sem resposta (mascaradas) |
-| `data/ponte-estado.json` | Modo (IA/humano) de cada telefone e partes de resposta pendentes |
+| `agente.lacunas` (banco) | Perguntas sem resposta (mascaradas) |
+| `agente.estado_ponte` (banco) | Modo (IA/humano) de cada telefone e partes de resposta pendentes; o modo da Lia fica em `agente.modo_lia` |
 | `data/orcamentos-teste.json` | Orçamentos TESTE da escrita simulada, que saiu em 25/10 (R5). Só existe em máquina que rodou antes disso; `limpar:dados` ainda o limpa |
-| `data/estado-sistema.json` | Suspensão e ferramentas desligadas |
+| `agente.estado_sistema` (banco) | Suspensão e ferramentas desligadas |
 
 - **Nunca** versionar `.env` nem `data/` (já estão no `.gitignore`).
-- Retenção (issue #4): `npm run limpar:dados -- --dias <prazo>` lista o que passou do prazo: conversas, artes, logs e, dentro de `orcamentos-teste.json`, `lacunas.jsonl` e `ponte-estado.json`, os registros desses clientes. Com `--executar`, apaga **de vez**. Rode com o agente e a ponte parados. **O prazo é decisão da loja**: registre aqui quando for decidido: `RETENCAO_DIAS = ____ (decidido por ____ em __/__/____)`.
-- O cliente pediu para apagar os dados dele? Pare o agente e a ponte, rode `npm run limpar:dados -- --telefone <telefone>` para conferir o que sai e repita com `--executar`. Sai tudo dele: conversa, artes, logs, orçamentos TESTE, lacunas e o estado na ponte.
+- Retenção (issue #4): `npm run limpar:dados -- --dias <prazo>` lista o que passou do prazo: conversas, lacunas, conversas corrompidas e registros da ponte (no banco), mais artes e logs (em disco). Com `--executar`, apaga **de vez**. Rode com o agente e a ponte parados. **O prazo é decisão da loja**: registre aqui quando for decidido: `RETENCAO_DIAS = ____ (decidido por ____ em __/__/____)`.
+- O cliente pediu para apagar os dados dele? Pare o agente e a ponte, rode `npm run limpar:dados -- --telefone <telefone>` para conferir o que sai e repita com `--executar`. Sai tudo dele: conversa (inclusive a corrompida), artes, logs, lacunas e o estado na ponte.
 
 ---
 

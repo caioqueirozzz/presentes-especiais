@@ -1,7 +1,7 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import type { Banco } from "../src/db/banco.js";
 import { bancoDeTeste } from "./helpers/bancoDeTeste.js";
-import { PgTipoStore, PgVectorStore } from "../src/catalogo/vetoresPg.js";
+import { CacheAssinado, PgTipoStore, PgVectorStore } from "../src/catalogo/vetoresPg.js";
 import { MemoryVectorStore, normalizar, type ConjuntoVetores } from "../src/catalogo/vetores.js";
 import { MemoryTipoStore, type TabelaTipos } from "../src/catalogo/tipos.js";
 
@@ -50,7 +50,7 @@ describe("PgVectorStore", () => {
     banco = await bancoDeTeste();
     const pg = new PgVectorStore(banco, "tipo");
     await pg.salvar(conjunto(["caneca", "camiseta"], (id) => id));
-    const lido = (await pg.carregar())!;
+    const lido = (await new PgVectorStore(banco, "tipo").carregar())!;
     expect(lido.ids).toEqual(["camiseta", "caneca"]);
     expect(lido.origem).toEqual({ caneca: "caneca", camiseta: "camiseta" });
   });
@@ -72,16 +72,32 @@ describe("PgVectorStore", () => {
     await leitor.salvar(conjunto(["a"]));
     const primeiro = await leitor.carregar();
 
-    // Outro processo grava: o leitor só percebe depois dos 5 min.
+    // Outro processo grava: o leitor só percebe depois dos 5 min, e relê em segundo plano.
     await new PgVectorStore(banco, "produto").salvar(conjunto(["a", "z"]));
     expect(await leitor.carregar()).toBe(primeiro);
     agora = 5 * 60_000 + 1;
+    expect(await leitor.carregar()).toBe(primeiro);
+    await leitor.aguardarReleitura();
     expect((await leitor.carregar())!.ids).toEqual(["a", "z"]);
 
     // Sem mudança no banco, a conferência não troca o objeto.
     const atual = await leitor.carregar();
     agora += 6 * 60_000;
     expect(await leitor.carregar()).toBe(atual);
+    await leitor.aguardarReleitura();
+    expect(await leitor.carregar()).toBe(atual);
+  });
+
+  it("depois do próprio salvar, a conferência não relê o conjunto", async () => {
+    banco = await bancoDeTeste();
+    let agora = 0;
+    const pg = new PgVectorStore(banco, "produto", () => agora);
+    await pg.salvar(conjunto(["a", "b"]));
+    const salvo = await pg.carregar();
+    agora = 5 * 60_000 + 1;
+    await pg.carregar();
+    await pg.aguardarReleitura();
+    expect(await pg.carregar()).toBe(salvo);
   });
 
   it("salvar já enxerga o que gravou, sem esperar", async () => {
@@ -123,5 +139,132 @@ describe("PgTipoStore", () => {
     await pg.salvar(tabela);
     await pg.salvar({ versao: 1, produtos: { p2: { tipo: "regata", atualizado_em: "2026-11-03" } } });
     expect((await pg.carregar()).produtos).toEqual({ p2: { tipo: "regata", atualizado_em: "2026-11-03" } });
+  });
+});
+
+describe("CacheAssinado", () => {
+  it("duas chamadas simultâneas durante a releitura fazem uma leitura só", async () => {
+    let leituras = 0;
+    let liberar!: () => void;
+    const portao = new Promise<void>((r) => (liberar = r));
+    const cache = new CacheAssinado(
+      async () => "s",
+      async () => {
+        leituras++;
+        await portao;
+        return "valor";
+      },
+      () => 0
+    );
+    const a = cache.obter();
+    const b = cache.obter();
+    liberar();
+    expect(await Promise.all([a, b])).toEqual(["valor", "valor"]);
+    expect(leituras).toBe(1);
+  });
+
+  it("definir serve o valor novo sem ir ao banco", async () => {
+    let idas = 0;
+    const cache = new CacheAssinado(
+      async () => {
+        idas++;
+        return "s1";
+      },
+      async () => "do-banco",
+      () => 0
+    );
+    await cache.obter();
+    cache.definir("do-salvar", "s2");
+    expect(await cache.obter()).toBe("do-salvar");
+    expect(idas).toBe(1);
+  });
+
+  it("com o conjunto em memória, a releitura não segura a busca", async () => {
+    let agora = 0;
+    let sig = "s1";
+    let liberar!: () => void;
+    const portao = new Promise<void>((r) => (liberar = r));
+    let leituras = 0;
+    const cache = new CacheAssinado(
+      async () => sig,
+      async () => {
+        if (++leituras === 1) return "v1";
+        await portao;
+        return "v2";
+      },
+      () => agora
+    );
+    expect(await cache.obter()).toBe("v1");
+    sig = "s2";
+    agora = 5 * 60_000 + 1;
+    // A leitura está presa no portão e mesmo assim a busca recebe o que já tinha.
+    expect(await cache.obter()).toBe("v1");
+    expect(await cache.obter()).toBe("v1");
+    liberar();
+    await cache.aguardarReleitura();
+    expect(await cache.obter()).toBe("v2");
+    expect(leituras).toBe(2);
+  });
+
+  it("falha na releitura de fundo mantém o conjunto e loga", async () => {
+    let agora = 0;
+    let fora = false;
+    const cache = new CacheAssinado(
+      async () => {
+        if (fora) throw Object.assign(new Error("banco fora"), { code: "ECONNREFUSED" });
+        return "s";
+      },
+      async () => "v1",
+      () => agora
+    );
+    await cache.obter();
+    fora = true;
+    agora = 5 * 60_000 + 1;
+    const erro = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await cache.obter()).toBe("v1");
+      await cache.aguardarReleitura();
+      expect(await cache.obter()).toBe("v1");
+      expect(erro).toHaveBeenCalledWith(expect.stringContaining('"type":"cache_releitura_falhou"'));
+      expect(erro).toHaveBeenCalledWith(expect.stringContaining('"code":"ECONNREFUSED"'));
+    } finally {
+      erro.mockRestore();
+    }
+  });
+
+  it("sem nada em memória, a falha da 1ª carga chega a quem pediu", async () => {
+    const cache = new CacheAssinado(
+      async () => {
+        throw new Error("banco fora");
+      },
+      async () => "v1",
+      () => 0
+    );
+    await expect(cache.obter()).rejects.toThrow("banco fora");
+  });
+
+  it("leitura que começou antes do definir não sobrescreve o valor novo", async () => {
+    let agora = 0;
+    let sig = "s1";
+    let liberar!: () => void;
+    const portao = new Promise<void>((r) => (liberar = r));
+    let leituras = 0;
+    const cache = new CacheAssinado<string>(
+      async () => sig,
+      async () => {
+        if (++leituras === 1) return "v1";
+        await portao;
+        return "velho-do-banco";
+      },
+      () => agora
+    );
+    await cache.obter();
+    sig = "s2";
+    agora = 5 * 60_000 + 1;
+    await cache.obter();
+    cache.definir("do-salvar", "s3");
+    liberar();
+    await cache.aguardarReleitura();
+    expect(await cache.obter()).toBe("do-salvar");
   });
 });

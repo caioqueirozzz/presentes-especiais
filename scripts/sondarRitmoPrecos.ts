@@ -13,6 +13,7 @@ import "dotenv/config";
 import { HttpBrindeMeClient } from "../src/integrations/brindeme/httpClient.js";
 import { DOMINIO_LOJA, ROTA_VITRINE } from "../src/integrations/brindeme/precoVenda.js";
 import { sondarRitmo, type RespostaSonda } from "../src/operacao/conferenciaPrecos.js";
+import { logarErroBanco } from "../src/db/banco.js";
 
 const DRAY_FIT = "afc89ae2-d187-405a-b826-d2e2ae0447f5";
 
@@ -55,6 +56,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error("Falha:", logarErroBanco(err));
   process.exit(1);
 });

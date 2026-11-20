@@ -65,8 +65,7 @@ export function setMotorSemantico(motor: MotorSemantico | null): void {
 }
 async function getIndice(): Promise<IndiceCatalogo> {
   if (indiceCarregado) return indiceCarregado;
-  if (!indexPadrao) throw new Error("store do catálogo não ligado: chame ligarStores(banco) na partida");
-  return indexPadrao.carregar();
+  return recarregarIndice();
 }
 function getTags(): OccasionTagStore {
   if (!tagsPadrao) tagsPadrao = new FileOccasionTagStore();

@@ -21,6 +21,7 @@ import { detalharProdutoHandler } from "../src/tools/detalharProduto.js";
 import { prepararOrcamentoHandler } from "../src/tools/prepararOrcamento.js";
 import { createInitialState } from "../src/agent/state.js";
 import { decidirSaida, quantidadesDeTeste, sortear, sorteador } from "../src/operacao/conferenciaPrecos.js";
+import { logarErroBanco } from "../src/db/banco.js";
 
 const SEMPRE = new Set(["afc89ae2-d187-405a-b826-d2e2ae0447f5", "dd4c5dbf-ab7d-4084-8c2b-e2f7e28669de"]);
 const TELEFONE_FICTICIO = "5500000000000";
@@ -45,7 +46,7 @@ async function main(): Promise<void> {
   const aleatorio = sorteador(numero("semente", 20261105));
   const indice = await carregarIndiceDeScript();
   if (indice.produtos.length === 0) {
-    console.error("Índice vazio ou v1: rode npm run sync:precos -- --migrar.");
+    console.error("Índice vazio: rode npm run sync:catalogo.");
     process.exit(1);
   }
   // Dois clientes na mesma API oficial: dividem o ritmo, senão somam o dobro e vem 429 (limite_excedido).
@@ -139,6 +140,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error("Falha:", logarErroBanco(err));
   process.exit(1);
 });

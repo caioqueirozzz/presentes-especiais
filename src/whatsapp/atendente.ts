@@ -4,6 +4,7 @@ import {
   lerEstadoSistema,
   type EstadoSistema,
 } from "../controle/estadoSistema.js";
+import { logarErroBanco } from "../db/banco.js";
 import { NOMES_FERRAMENTAS, ehFerramenta } from "../tools/nomes.js";
 import type { ClienteAgente } from "./agenteHttp.js";
 import type { MensagemRecebida } from "./canal.js";
@@ -267,6 +268,18 @@ export class Atendimento {
     }
   }
 
+  /** Banco fora: avisa o operador em vez de confirmar um estado que não foi gravado. */
+  private async gravarControle(gravar: () => void | Promise<void>): Promise<boolean> {
+    try {
+      await gravar();
+      return true;
+    } catch (err) {
+      this.log({ type: "controle_nao_gravado", ...logarErroBanco(err) });
+      await this.envio.paraMim("⚠️ Não consegui gravar: o banco não respondeu. O agente continua como estava.");
+      return false;
+    }
+  }
+
   private async tratarComando(texto: string): Promise<void> {
     const comando = interpretarComando(texto);
     if (!comando) return;
@@ -275,14 +288,14 @@ export class Atendimento {
         await this.devolver(comando.telefone, comando.nota);
         break;
       case "suspender":
-        await this.controle.suspender(comando.motivo);
+        if (!(await this.gravarControle(() => this.controle.suspender(comando.motivo)))) break;
         this.log({ type: "agente_suspenso", motivo: comando.motivo ?? "" });
         await this.envio.paraMim(
           `⏸️ Agente suspenso${comando.motivo ? ` — ${comando.motivo}` : ""}. Use #retomar para religar.`
         );
         break;
       case "retomar":
-        await this.controle.retomar();
+        if (!(await this.gravarControle(() => this.controle.retomar()))) break;
         this.log({ type: "agente_retomado" });
         await this.envio.paraMim("▶️ Agente retomado. Voltando a responder os clientes.");
         break;
@@ -294,7 +307,7 @@ export class Atendimento {
           );
           break;
         }
-        await this.controle.desligar(comando.ferramenta);
+        if (!(await this.gravarControle(() => this.controle.desligar(comando.ferramenta)))) break;
         this.log({ type: "ferramenta_desligada", ferramenta: comando.ferramenta });
         await this.envio.paraMim(
           `🔒 Ferramenta "${comando.ferramenta}" desligada. Use #religar ${comando.ferramenta} para religar.`
@@ -307,7 +320,7 @@ export class Atendimento {
           );
           break;
         }
-        await this.controle.religar(comando.ferramenta);
+        if (!(await this.gravarControle(() => this.controle.religar(comando.ferramenta)))) break;
         this.log({ type: "ferramenta_religada", ferramenta: comando.ferramenta });
         await this.envio.paraMim(`🔓 Ferramenta "${comando.ferramenta}" religada.`);
         break;

@@ -21,7 +21,7 @@ export interface Achado {
 export interface FatosAmbiente {
   /** Existe arquivo .env na raiz. */
   temArquivoEnv: boolean;
-  /** Produtos no índice do catálogo (data/catalogo*.json). */
+  /** Produtos no índice do catálogo (agente.produtos no banco; no mock, os fixtures). */
   produtosNoIndice: number;
   /** Itens aprovados na base de conhecimento. */
   itensAprovados: number;

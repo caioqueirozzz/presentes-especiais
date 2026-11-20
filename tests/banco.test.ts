@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { exigirSsl, aplicarMigrations, logarErroBanco, type Banco } from "../src/db/banco.js";
+import { abrirBanco, exigirSsl, aplicarMigrations, logarErroBanco, type Banco } from "../src/db/banco.js";
 import { bancoDeTeste } from "./helpers/bancoDeTeste.js";
 
 describe("banco", () => {
@@ -47,5 +47,14 @@ describe("banco", () => {
   it("o log de erro não leva a URL nem os parâmetros", () => {
     const err = Object.assign(new Error("duplicate key"), { code: "23505", parameters: ["5583999990000"] });
     expect(logarErroBanco(err)).toEqual({ code: "23505", message: "duplicate key" });
+  });
+
+  it("URL malformada não vaza a senha na mensagem nem no stack", async () => {
+    const url = "postgres://agente:se#nha@ep-x.neon.tech/db";
+    for (const f of [() => exigirSsl(url), () => abrirBanco(url)]) {
+      const err = await Promise.resolve().then(f).then(() => null, (e: Error) => e);
+      expect(err?.message).toMatch(/AGENTE_DATABASE_URL inválida/);
+      expect(`${err?.message}${err?.stack}`).not.toContain("se#nha");
+    }
   });
 });
