@@ -1,8 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
 import { AgenteDefinitivo } from "../src/api/agenteDefinitivo.js";
+import { MemoriaConversas } from "../src/conversas/armazem.js";
 import { RepositorioConversas } from "../src/conversas/repositorio.js";
 import { pedido } from "./helpers/bateriaContrato.js";
 import { runTurn } from "../src/agent/runTurn.js";
@@ -145,7 +143,7 @@ Total estimado: R$ 500,00`;
 
   it("AgenteDefinitivo: turno normal com buscar_produtos devolve o texto num balão só, antes dos cartões", async () => {
     await usarIndiceDoMock();
-    const repo = new RepositorioConversas(mkdtempSync(join(tmpdir(), "conversas-")));
+    const repo = new RepositorioConversas(new MemoriaConversas());
     const llm = new ScriptedLLM([toolUse("buscar_produtos", { consulta: "caneca", quantidade: 50 }), endTurn("Qual delas te agrada?")]);
     const agente = new AgenteDefinitivo({ repo, llm, client: new MockBrindeMeClient(), tetoMs: 90_000, respostasPorHora: 30 });
     const r = await agente.processarLote(pedido("5583999990000", ["r1"]));

@@ -12,7 +12,7 @@
  */
 import "dotenv/config";
 import { config } from "../src/config.js";
-import { FileProductIndexStore } from "../src/catalogo/indice.js";
+import { carregarIndiceDeScript } from "../src/catalogo/abrir.js";
 import { MAX_CORES_COTADAS } from "../src/catalogo/cotacao.js";
 import { createBrindeMeClient } from "../src/integrations/brindeme/factory.js";
 import { HttpBrindeMeClient } from "../src/integrations/brindeme/httpClient.js";
@@ -43,7 +43,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   const aleatorio = sorteador(numero("semente", 20261105));
-  const indice = new FileProductIndexStore().carregar();
+  const indice = await carregarIndiceDeScript();
   if (indice.produtos.length === 0) {
     console.error("Índice vazio ou v1: rode npm run sync:precos -- --migrar.");
     process.exit(1);

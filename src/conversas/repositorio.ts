@@ -1,10 +1,8 @@
-import { existsSync } from "fs";
-import { join, resolve } from "path";
 import { z } from "zod";
 import { createInitialState, type ConversationState } from "../agent/state.js";
 import { respostaMensagensSchema, type RespostaMensagens } from "../contrato/esquemas.js";
 import type { ResumoTransferencia } from "../tools/transferirHumano.js";
-import { gravarArquivoAtomico, lerArquivo, separarCorrompido } from "../util/arquivo.js";
+import type { ArmazemConversas } from "./armazem.js";
 
 export const MAX_TURNOS_GUARDADOS = 20;
 export const MAX_IDS_VISTOS = 1_000;
@@ -90,47 +88,60 @@ export function novaConversa(telefone: string): Conversa {
   };
 }
 
+const TELEFONE = /^\d{10,15}$/;
+
+function exigirTelefone(telefone: string): void {
+  if (!TELEFONE.test(telefone)) throw new Error("telefone inválido");
+}
+
 export class RepositorioConversas {
-  private readonly dir: string;
+  /** Última gravação por telefone: a próxima espera a anterior, para não chegarem fora de ordem. */
+  private readonly gravacoes = new Map<string, Promise<void>>();
 
   constructor(
-    dir: string,
+    private readonly armazem: ArmazemConversas,
     private readonly log: (evento: Record<string, unknown>) => void = () => {}
-  ) {
-    this.dir = resolve(dir);
+  ) {}
+
+  async existe(telefone: string): Promise<boolean> {
+    exigirTelefone(telefone);
+    return (await this.armazem.ler(telefone)) !== null;
   }
 
-  existe(telefone: string): boolean {
-    return existsSync(this.arquivo(telefone));
-  }
-
-  carregar(telefone: string): Conversa {
-    const arquivo = this.arquivo(telefone);
-    const bruto = lerArquivo(arquivo);
+  async carregar(telefone: string): Promise<Conversa> {
+    exigirTelefone(telefone);
+    await this.gravacoes.get(telefone)?.catch(() => {});
+    const bruto = await this.armazem.ler(telefone);
     if (bruto === null) return novaConversa(telefone);
     try {
-      const c = conversaSchema.parse(JSON.parse(bruto)) as unknown as Conversa;
-      if (c.estado.telefone !== telefone) throw new Error("arquivo de outro telefone");
+      const c = conversaSchema.parse(bruto) as unknown as Conversa;
+      if (c.estado.telefone !== telefone) throw new Error("documento de outro telefone");
       return c;
     } catch (err) {
-      const destino = separarCorrompido(arquivo);
-      this.log({ type: "alerta", gravidade: "alta", motivo: "estado_corrompido", arquivo: destino ?? arquivo, erro: String(err).slice(0, 500) });
+      await this.armazem.separarCorrompido(telefone, bruto, String(err));
+      this.log({ type: "alerta", gravidade: "alta", motivo: "estado_corrompido", tabela: "agente.conversas_corrompidas", erro: String(err).slice(0, 500) });
       return novaConversa(telefone);
     }
   }
 
-  salvar(c: Conversa): void {
+  salvar(c: Conversa): Promise<void> {
+    const telefone = c.estado.telefone;
+    exigirTelefone(telefone);
     c.turnos = c.turnos.slice(-MAX_TURNOS_GUARDADOS);
     c.idsVistos = c.idsVistos.slice(-MAX_IDS_VISTOS);
     c.estado.historico = c.estado.historico.slice(-MAX_HISTORICO);
     if (c.estado.arquivosRecebidos) c.estado.arquivosRecebidos = c.estado.arquivosRecebidos.slice(-MAX_ARQUIVOS_RECEBIDOS);
     const falhas = Object.entries(c.falhasPorTurno);
     if (falhas.length > MAX_FALHAS_GUARDADAS) c.falhasPorTurno = Object.fromEntries(falhas.slice(-MAX_FALHAS_GUARDADAS));
-    gravarArquivoAtomico(this.arquivo(c.estado.telefone), JSON.stringify(c));
-  }
-
-  private arquivo(telefone: string): string {
-    if (!/^\d{10,15}$/.test(telefone)) throw new Error("telefone inválido para nome de arquivo");
-    return join(this.dir, `${telefone}.json`);
+    const retrato: unknown = JSON.parse(JSON.stringify(c));
+    const anterior = this.gravacoes.get(telefone) ?? Promise.resolve();
+    const esta = anterior.catch(() => {}).then(() => this.armazem.gravar(telefone, retrato));
+    this.gravacoes.set(telefone, esta);
+    void esta
+      .finally(() => {
+        if (this.gravacoes.get(telefone) === esta) this.gravacoes.delete(telefone);
+      })
+      .catch(() => {});
+    return esta;
   }
 }

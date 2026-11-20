@@ -1,60 +1,70 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { existsSync, mkdtempSync, readdirSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
-import { ArquivoEstadoPonte, estadoVazio } from "../src/whatsapp/estadoPonte.js";
+import { describe, it, expect, afterEach } from "vitest";
+import { estadoVazio, MemoriaEstadoPonte, normalizarEstadoPonte, PgEstadoPonte, type ArmazemPonte } from "../src/whatsapp/estadoPonte.js";
+import type { Banco } from "../src/db/banco.js";
+import { bancoDeTeste } from "./helpers/bancoDeTeste.js";
 
 const TEL = "5583999990000";
+let banco: Banco | undefined;
+afterEach(async () => {
+  await banco?.fechar();
+  banco = undefined;
+});
 
-describe("ArquivoEstadoPonte", () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "ponte-estado-"));
+const versoes: Array<[string, () => Promise<ArmazemPonte>]> = [
+  ["memória", async () => new MemoriaEstadoPonte()],
+  ["postgres", async () => new PgEstadoPonte((banco = await bancoDeTeste()))],
+];
+
+describe.each(versoes)("estado da ponte sobre %s", (_nome, criar) => {
+  it("sem registro → estado vazio", async () => {
+    expect(await (await criar()).carregar()).toEqual(estadoVazio());
   });
 
-  it("sem arquivo → estado vazio", () => {
-    expect(new ArquivoEstadoPonte(join(dir, "ponte.json")).carregar()).toEqual(estadoVazio());
+  it("salva e relê", async () => {
+    const a = await criar();
+    const e = { ...estadoVazio(), modos: { [TEL]: "humano" as const }, concluidos: ["m1"] };
+    await a.salvar(e);
+    expect(await a.carregar()).toEqual(e);
   });
 
-  it("salva e relê, sem deixar .tmp", () => {
-    const arquivo = join(dir, "ponte.json");
-    const estado = {
-      ...estadoVazio(),
-      modos: { [TEL]: "humano" as const },
-      avisosPendentes: ["resumo"],
-      concluidos: ["m1", "m2"],
-    };
-    new ArquivoEstadoPonte(arquivo).salvar(estado);
-    expect(new ArquivoEstadoPonte(arquivo).carregar()).toEqual(estado);
-    expect(readdirSync(dir)).toEqual(["ponte.json"]);
+  it("salva de novo por cima do registro", async () => {
+    const a = await criar();
+    await a.salvar({ ...estadoVazio(), concluidos: ["m1"] });
+    await a.salvar({ ...estadoVazio(), concluidos: ["m1", "m2"], avisosPendentes: ["resumo"] });
+    expect(await a.carregar()).toMatchObject({ concluidos: ["m1", "m2"], avisosPendentes: ["resumo"] });
   });
 
-  it("estado gravado antes das entregas parciais carrega; entrada inválida é ignorada", () => {
-    const arquivo = join(dir, "ponte.json");
-    const { entregasParciais: _, ...antigo } = estadoVazio();
-    writeFileSync(arquivo, JSON.stringify(antigo), "utf-8");
-    expect(new ArquivoEstadoPonte(arquivo).carregar().entregasParciais).toEqual({});
-
-    const valida = { ids: ["m1"], partes: ["parte 1"] };
-    writeFileSync(arquivo, JSON.stringify({ ...antigo, entregasParciais: { [TEL]: valida, "5583000": { ids: "m1" } } }), "utf-8");
-    expect(new ArquivoEstadoPonte(arquivo).carregar().entregasParciais).toEqual({ [TEL]: valida });
-  });
-
-  it("entrega parcial com foto salva e relê", () => {
-    const arquivo = join(dir, "ponte.json");
+  it("entrega parcial com foto salva e relê", async () => {
+    const a = await criar();
     const partes = [{ imagem_url: "https://cdn.brinde.me/x.webp", legenda: "L" }, "texto"];
     const estado = { ...estadoVazio(), entregasParciais: { [TEL]: { ids: ["m1"], partes } } };
-    new ArquivoEstadoPonte(arquivo).salvar(estado);
-    expect(new ArquivoEstadoPonte(arquivo).carregar().entregasParciais).toEqual({ [TEL]: { ids: ["m1"], partes } });
+    await a.salvar(estado);
+    expect((await a.carregar()).entregasParciais).toEqual({ [TEL]: { ids: ["m1"], partes } });
+  });
+});
+
+describe("normalizarEstadoPonte", () => {
+  it("estado gravado antes das entregas parciais carrega; entrada inválida é ignorada", () => {
+    const { entregasParciais: _, ...antigo } = estadoVazio();
+    expect(normalizarEstadoPonte(antigo).entregasParciais).toEqual({});
+
+    const valida = { ids: ["m1"], partes: ["parte 1"] };
+    const bruto = { ...antigo, entregasParciais: { [TEL]: valida, "5583000": { ids: "m1" } } };
+    expect(normalizarEstadoPonte(bruto).entregasParciais).toEqual({ [TEL]: valida });
   });
 
-  it("arquivo ilegível vira .corrompido-<data> e a ponte começa do zero, com alerta", () => {
-    const arquivo = join(dir, "ponte.json");
-    writeFileSync(arquivo, "{ quebrado", "utf-8");
-    const alertas: Array<Record<string, unknown>> = [];
-    expect(new ArquivoEstadoPonte(arquivo, (e) => alertas.push(e)).carregar()).toEqual(estadoVazio());
-    expect(existsSync(arquivo)).toBe(false);
-    expect(readdirSync(dir).some((f) => f.startsWith("ponte.json.corrompido-"))).toBe(true);
-    expect(alertas[0]).toMatchObject({ type: "alerta", motivo: "estado_da_ponte_corrompido" });
+  it("formato inesperado lança erro", () => {
+    expect(() => normalizarEstadoPonte({ versao: 9 })).toThrow("formato inesperado");
+    expect(() => normalizarEstadoPonte(null)).toThrow("formato inesperado");
+  });
+});
+
+describe("PgEstadoPonte", () => {
+  it("documento inválido no banco → estado vazio e alerta", async () => {
+    banco = await bancoDeTeste();
+    await banco.query("INSERT INTO agente.estado_ponte (id, doc) VALUES (1, '{\"versao\": 9}')");
+    const eventos: Record<string, unknown>[] = [];
+    expect(await new PgEstadoPonte(banco, (e) => eventos.push(e)).carregar()).toEqual(estadoVazio());
+    expect(eventos[0]).toMatchObject({ motivo: "estado_da_ponte_corrompido" });
   });
 });

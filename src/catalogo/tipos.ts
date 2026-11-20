@@ -13,7 +13,7 @@
  *
  * Interface assíncrona desde o começo (contrato com a Fase 1, spec §9).
  */
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from "fs";
+import { readFileSync, existsSync, statSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -138,58 +138,6 @@ export function mapaDeTipos(tabela: TabelaTipos): Map<string, string> {
 /** Os tipos distintos em uso, ordenados: é a lista que ganha vetor próprio. */
 export function tiposDistintos(tabela: TabelaTipos): string[] {
   return [...new Set(mapaDeTipos(tabela).values())].filter(Boolean).sort();
-}
-
-// ---------------------------------------------------------------------------
-// Versão em arquivo
-// ---------------------------------------------------------------------------
-
-export function arquivoTiposPadrao(modo: "mock" | "http"): string {
-  return join(__dir, "../../data", modo === "http" ? "tipos-produto.json" : "tipos-produto-mock.json");
-}
-
-export class FileTipoStore implements TipoStore {
-  private cache: TabelaTipos | null = null;
-  private assinatura = "";
-
-  constructor(private readonly file: string) {}
-
-  private assinar(): string {
-    if (!existsSync(this.file)) return "ausente";
-    const st = statSync(this.file);
-    return `${st.mtimeMs}:${st.size}`;
-  }
-
-  async carregar(): Promise<TabelaTipos> {
-    const atual = this.assinar();
-    if (this.cache && atual === this.assinatura) return this.cache;
-
-    let tabela = tabelaTiposVazia();
-    if (atual !== "ausente") {
-      try {
-        const raw = JSON.parse(readFileSync(this.file, "utf-8")) as TabelaTipos;
-        if (raw && raw.versao === VERSAO_TIPOS && raw.produtos) tabela = raw;
-      } catch {
-        // ilegível: trata como vazio; a próxima geração reescreve
-      }
-    }
-    this.cache = tabela;
-    this.assinatura = atual;
-    return tabela;
-  }
-
-  async salvar(tabela: TabelaTipos): Promise<void> {
-    mkdirSync(dirname(this.file), { recursive: true });
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(tabela), "utf-8");
-    try {
-      renameSync(tmp, this.file);
-    } catch {
-      writeFileSync(this.file, JSON.stringify(tabela), "utf-8");
-    }
-    this.cache = null;
-    this.assinatura = "";
-  }
 }
 
 export class MemoryTipoStore implements TipoStore {

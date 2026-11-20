@@ -17,7 +17,7 @@ import { tokenizar } from "../busca/texto.js";
 import { sinonimosDe } from "../busca/sinonimos.js";
 import type { BrindeMeClient } from "../integrations/brindeme/client.js";
 import { translateApiError, ApiError, type FalhaApi } from "../integrations/brindeme/errors.js";
-import type { FaixaPreco, ProductIndexStore, ProdutoIndexado } from "./indice.js";
+import type { FaixaPreco, IndiceCatalogo, ProdutoIndexado } from "./indice.js";
 import { construirRegistro } from "./indice.js";
 import { cotarAoVivo, cotou, MAX_CORES_COTADAS, type ResultadoCotacao } from "./cotacao.js";
 import { proximoDegrau } from "./faixasDeVenda.js";
@@ -66,7 +66,8 @@ export interface PedidoRecomendacao {
 }
 
 export interface Dependencias {
-  index: ProductIndexStore;
+  /** Já carregado: ler do banco a cada pergunta custaria uma ida e volta; a mesma referência mantém o cache do BM25. */
+  indice: IndiceCatalogo;
   tags: OccasionTagStore;
   client: BrindeMeClient;
   agora?: () => Date;
@@ -355,7 +356,7 @@ export async function recomendar(
   deps: Dependencias
 ): Promise<Recomendacao> {
   const agora = deps.agora ?? (() => new Date());
-  const { produtos } = deps.index.carregar();
+  const { produtos } = deps.indice;
   if (produtos.length === 0) return { tipo: "indice_vazio" };
 
   const consulta = interpretar(pedido.consulta, pedido.ocasiao);

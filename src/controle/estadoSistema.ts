@@ -1,19 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { dirname, join, resolve } from "path";
-import { fileURLToPath } from "url";
+import type { Banco } from "../db/banco.js";
+import { logarErroBanco } from "../db/banco.js";
 
-const __dir = dirname(fileURLToPath(import.meta.url));
-
-/**
- * ESTADO_SISTEMA_ARQUIVO (documentada no .env.example) era ignorada: o caminho era sempre o padrão.
- * Lida na hora da chamada, depois de o dotenv carregar; agente e ponte precisam apontar para o mesmo arquivo.
- */
-export function arquivoEstadoSistema(): string {
-  const doEnv = process.env.ESTADO_SISTEMA_ARQUIVO?.trim();
-  return doEnv ? resolve(doEnv) : join(__dir, "../../data/estado-sistema.json");
-}
-
-const CACHE_MS = 30_000;
+const RELEITURA_MS = 30_000;
 
 export interface EstadoSistema {
   suspenso: boolean;
@@ -23,40 +11,66 @@ export interface EstadoSistema {
   ferramentasDesligadas?: string[];
 }
 
-let cache: { estado: EstadoSistema; lido: number } | null = null;
+let atual: EstadoSistema = { suspenso: false };
+let banco: Banco | null = null;
+let timer: NodeJS.Timeout | null = null;
+// Cada escrita local invalida leituras que já estavam em voo (senão o SELECT antigo sobrescreve o novo valor).
+let versao = 0;
 
-export function lerEstadoSistema(arquivo = arquivoEstadoSistema()): EstadoSistema {
-  const agora = Date.now();
-  if (cache && agora - cache.lido < CACHE_MS) return cache.estado;
+function valido(bruto: unknown): EstadoSistema {
+  if (!bruto || typeof bruto !== "object" || typeof (bruto as Record<string, unknown>).suspenso !== "boolean") {
+    return { suspenso: false };
+  }
+  return bruto as EstadoSistema;
+}
+
+async function ler(b: Banco): Promise<void> {
+  const v = versao;
+  const [linha] = await b.query<{ estado: unknown }>("SELECT estado FROM agente.estado_sistema WHERE id = 1");
+  if (v === versao) atual = linha ? valido(linha.estado) : { suspenso: false };
+}
+
+async function reler(): Promise<void> {
+  if (!banco) return;
   try {
-    if (!existsSync(arquivo)) {
-      cache = { estado: { suspenso: false }, lido: agora };
-      return cache.estado;
-    }
-    const parsed = JSON.parse(readFileSync(arquivo, "utf-8")) as unknown;
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      typeof (parsed as Record<string, unknown>).suspenso !== "boolean"
-    ) {
-      throw new Error("formato inválido");
-    }
-    const estado = parsed as EstadoSistema;
-    cache = { estado, lido: agora };
-    return estado;
-  } catch {
-    cache = { estado: { suspenso: false }, lido: agora };
-    return cache.estado;
+    await ler(banco);
+  } catch (err) {
+    // Sem banco, vale o último estado lido: suspenso não pode virar ativo por falha de leitura.
+    console.error(JSON.stringify({ type: "estado_sistema_nao_lido", ...logarErroBanco(err) }));
   }
 }
 
-export function escreverEstadoSistema(estado: EstadoSistema, arquivo = arquivoEstadoSistema()): void {
-  mkdirSync(dirname(arquivo), { recursive: true });
-  writeFileSync(arquivo, JSON.stringify(estado, null, 2), "utf-8");
-  cache = { estado, lido: Date.now() };
+export async function ligarEstadoSistema(b: Banco, intervaloMs = RELEITURA_MS): Promise<() => void> {
+  if (timer) clearInterval(timer);
+  // A primeira leitura propaga o erro: sem saber se está suspenso, o processo não deve subir como ativo.
+  await ler(b);
+  banco = b;
+  const t = setInterval(() => void reler(), intervaloMs);
+  t.unref();
+  timer = t;
+  return () => clearInterval(t);
 }
 
-/** Força releitura do disco na próxima chamada. Usado nos testes. */
+export function lerEstadoSistema(): EstadoSistema {
+  return atual;
+}
+
+export async function escreverEstadoSistema(estado: EstadoSistema): Promise<void> {
+  versao++;
+  atual = estado;
+  if (!banco) return;
+  await banco.query(
+    `INSERT INTO agente.estado_sistema (id, estado, atualizado_em) VALUES (1, $1::jsonb, now())
+     ON CONFLICT (id) DO UPDATE SET estado = EXCLUDED.estado, atualizado_em = now()`,
+    [JSON.stringify(estado)]
+  );
+}
+
+/** Volta ao padrão e desliga o banco. Usado nos testes. */
 export function invalidarCache(): void {
-  cache = null;
+  if (timer) clearInterval(timer);
+  timer = null;
+  versao = 0;
+  atual = { suspenso: false };
+  banco = null;
 }

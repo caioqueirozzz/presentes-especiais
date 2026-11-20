@@ -10,26 +10,12 @@
  * O índice é só um filtro de candidatos: preço e estoque que chegam ao cliente
  * são sempre reconferidos em `GET /product/{id}` (ver recomendar.ts).
  *
- * Mesmo desenho do índice de pedidos da Fase 2: arquivo JSON agora, interface
- * `ProductIndexStore` para a Fase 5 trocar por Supabase sem tocar na lógica.
+ * Guardado no Postgres (`PgProductIndexStore`); em mock, só em memória.
  */
-import {
-  readFileSync,
-  writeFileSync,
-  renameSync,
-  mkdirSync,
-  existsSync,
-  statSync,
-} from "fs";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
 import type { BrindeMeClient } from "../integrations/brindeme/client.js";
 import type { Product } from "../integrations/brindeme/types.js";
 import { removerHtml } from "../busca/texto.js";
 import { arredondar } from "../integrations/brindeme/mappers.js";
-import { config } from "../config.js";
-
-const __dir = dirname(fileURLToPath(import.meta.url));
 
 export const VERSAO_INDICE = 2;
 /** Quantas sincronizações completas seguidas um produto pode faltar na listagem antes de sair do índice. */
@@ -101,65 +87,16 @@ export interface ProductIndexStore {
    * Devolve a MESMA referência enquanto o conteúdo não mudar — o motor de busca
    * guarda o índice BM25 por referência para não reconstruí-lo a cada pergunta.
    */
-  carregar(): IndiceCatalogo;
-  salvar(indice: IndiceCatalogo): void;
-}
-
-/** O mock grava produtos de teste: nunca no mesmo arquivo do catálogo real. */
-export function arquivoIndicePadrao(modo: "mock" | "http"): string {
-  return join(__dir, "../../data", modo === "http" ? "produtos-index.json" : "produtos-index-mock.json");
-}
-
-export class FileProductIndexStore implements ProductIndexStore {
-  private cache: IndiceCatalogo | null = null;
-  private assinatura = "";
-
-  constructor(private readonly file = arquivoIndicePadrao(config.brindeMe.mode)) {}
-
-  private assinar(): string {
-    if (!existsSync(this.file)) return "ausente";
-    const st = statSync(this.file);
-    return `${st.mtimeMs}:${st.size}`;
-  }
-
-  carregar(): IndiceCatalogo {
-    const atual = this.assinar();
-    if (this.cache && atual === this.assinatura) return this.cache;
-
-    let indice = indiceVazio();
-    if (atual !== "ausente") {
-      try {
-        const raw = JSON.parse(readFileSync(this.file, "utf-8")) as IndiceCatalogo;
-        if (raw && raw.versao === VERSAO_INDICE && Array.isArray(raw.produtos)) indice = raw;
-      } catch {
-        // arquivo truncado ou ilegível: trata como índice vazio; o próximo sync reescreve.
-      }
-    }
-    this.cache = indice;
-    this.assinatura = atual;
-    return indice;
-  }
-
-  salvar(indice: IndiceCatalogo): void {
-    mkdirSync(dirname(this.file), { recursive: true });
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(indice), "utf-8");
-    try {
-      renameSync(tmp, this.file);
-    } catch {
-      // Windows: rename falha se outro processo (o chat) estiver com o arquivo aberto.
-      writeFileSync(this.file, JSON.stringify(indice), "utf-8");
-    }
-    this.cache = null;
-  }
+  carregar(): Promise<IndiceCatalogo>;
+  salvar(indice: IndiceCatalogo): Promise<void>;
 }
 
 export class MemoryProductIndexStore implements ProductIndexStore {
   constructor(private indice: IndiceCatalogo = indiceVazio()) {}
-  carregar(): IndiceCatalogo {
+  async carregar(): Promise<IndiceCatalogo> {
     return this.indice;
   }
-  salvar(indice: IndiceCatalogo): void {
+  async salvar(indice: IndiceCatalogo): Promise<void> {
     this.indice = indice;
   }
 }
@@ -295,7 +232,7 @@ export async function sincronizarCatalogo(
   }
   const paginas = Math.min(pagina, maxPaginas);
 
-  const anteriores = new Map(store.carregar().produtos.map((p) => [p.id, p]));
+  const anteriores = new Map((await store.carregar()).produtos.map((p) => [p.id, p]));
   const ativos = [...listados.values()].filter((p) => p.status);
 
   // 2. Quais precisam do detalhe.
@@ -369,7 +306,7 @@ export async function sincronizarCatalogo(
   }
 
   const completo = terminou && falhas.length === 0;
-  store.salvar({
+  await store.salvar({
     versao: VERSAO_INDICE,
     sincronizado_em: agora.toISOString(),
     completo,

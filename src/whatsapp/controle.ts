@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { timingSafeEqual } from "crypto";
 import type { LogPonte } from "./log.js";
-import { validarConfigLia, type ArquivoModoLia } from "./modoLia.js";
+import { validarConfigLia, type ArmazemModoLia } from "./modoLia.js";
 import type { Ponte } from "./ponte.js";
 import type { CanalWwebjs } from "./sessao.js";
 
@@ -51,7 +51,7 @@ export function iniciarControle(opcoes: {
   segredo: string;
   canal: CanalWwebjs;
   ponte: Ponte;
-  lia: ArquivoModoLia;
+  lia: ArmazemModoLia;
   log: LogPonte;
 }): void {
   const { canal, ponte, lia, segredo, log } = opcoes;
@@ -62,12 +62,12 @@ export function iniciarControle(opcoes: {
         return responder(res, 200, canal.situacao());
       }
       if (req.method === "GET" && req.url === "/lia") {
-        return responder(res, 200, lia.ler());
+        return responder(res, 200, await lia.ler());
       }
       if (req.method === "POST" && req.url === "/lia") {
         const valido = validarConfigLia(await lerJson(req));
         if (typeof valido === "string") return responder(res, 400, { erro: valido });
-        const salvo = lia.salvar(valido);
+        const salvo = await lia.salvar(valido);
         ponte.definirModoLia(salvo);
         log({ type: "modo_lia", modo: salvo.modo, numerosTeste: salvo.numerosTeste.length });
         return responder(res, 200, salvo);

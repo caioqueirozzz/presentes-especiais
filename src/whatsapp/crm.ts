@@ -1,5 +1,3 @@
-import { readFile } from "fs/promises";
-import { join } from "path";
 import type { LogPonte } from "./log.js";
 import type { MensagemObservada, ObservadorPonte } from "./ponte.js";
 
@@ -28,7 +26,7 @@ export class ObservadorCrm implements ObservadorPonte {
   constructor(
     private readonly url: string,
     private readonly segredo: string,
-    private readonly conversasDir: string,
+    private readonly lerConversa: (telefone: string) => Promise<unknown | null>,
     private readonly log: LogPonte
   ) {
     setInterval(() => void this.esvaziar(), INTERVALO_MS).unref();
@@ -85,10 +83,11 @@ export class ObservadorCrm implements ObservadorPonte {
     let corpo: unknown;
     if (item.rota === "conversas") {
       try {
-        corpo = JSON.parse(await readFile(join(this.conversasDir, `${item.telefone}.json`), "utf8"));
+        corpo = await this.lerConversa(item.telefone);
       } catch {
-        return true; // conversa ainda sem arquivo (ex.: só mensagens do atendente)
+        return false; // banco fora: tenta de novo depois
       }
+      if (corpo === null) return true; // conversa ainda sem registro (ex.: só mensagens do atendente)
     } else {
       corpo = item.corpo;
     }

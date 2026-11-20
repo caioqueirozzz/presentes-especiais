@@ -7,7 +7,7 @@
  *   npm run sync:catalogo -- --ritmo 55      # req/min; só com o agente desligado (a API corta em 60/min)
  *
  * Lê GET /product página por página e GET /product/{id} dos produtos ativos que
- * mudaram, e grava data/produtos-index.json (no mock, data/produtos-index-mock.json). Somente leitura na API.
+ * mudaram, e grava no banco (schema agente). Só com BRINDEME_MODE=http. Somente leitura na API.
  *
  * Pensado para rodar de hora em hora (cron / agendador). Só relê o detalhe de
  * quem mudou (updated_at) ou passou da idade máxima; estoque e preço que o
@@ -15,8 +15,8 @@
  */
 import "dotenv/config";
 import { createBrindeMeClient } from "../src/integrations/brindeme/factory.js";
-import { relative } from "path";
-import { arquivoIndicePadrao, FileProductIndexStore, sincronizarCatalogo } from "../src/catalogo/indice.js";
+import { abrirCatalogoHttp } from "../src/catalogo/abrir.js";
+import { sincronizarCatalogo } from "../src/catalogo/indice.js";
 import { config } from "../src/config.js";
 
 const GREEN = "\x1b[32m";
@@ -44,8 +44,8 @@ async function main() {
     `${GRAY}  modo: ${config.brindeMe.mode} · concorrência: ${concorrencia} · ritmo: ${ritmo} req/min${forcar ? " · forçado" : ""}${RESET}\n`
   );
 
+  const { store, fechar } = await abrirCatalogoHttp("sync:catalogo");
   const client = createBrindeMeClient({ reqPorMinuto: ritmo });
-  const store = new FileProductIndexStore();
   const inicio = Date.now();
   let ultimaLinha = "";
 
@@ -72,7 +72,7 @@ async function main() {
   console.log(
     `${GRAY}  detalhe lido: ${r.lidosNoDetalhe} · reaproveitados: ${r.reaproveitados} · novos: ${r.novos} · removidos: ${r.removidos}${RESET}`
   );
-  console.log(`${GRAY}  índice: ${relative(process.cwd(), arquivoIndicePadrao(config.brindeMe.mode))} · ${segundos}s${RESET}`);
+  console.log(`${GRAY}  ${segundos}s${RESET}`);
 
   if (!r.listagemCompleta) {
     console.log(

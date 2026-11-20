@@ -13,16 +13,17 @@ import type { Product } from "../src/integrations/brindeme/types.js";
 const T0 = new Date("2026-11-06T12:00:00Z");
 
 function montar(produtos: Product[]) {
-  const index = new MemoryProductIndexStore({
+  const indice = {
     versao: VERSAO_INDICE,
     sincronizado_em: T0.toISOString(),
     completo: true,
     produtos: produtos.map((p) => construirRegistro(p, T0)),
-  });
+  };
+  const index = new MemoryProductIndexStore(indice);
   const client = new ClienteCatalogoFalso(produtos);
   setProductIndexStore(index);
   setOccasionTagStore(new MemoryOccasionTagStore());
-  return { index, client, deps: { index, tags: new MemoryOccasionTagStore(), client, agora: () => T0 } };
+  return { indice, client, deps: { indice, tags: new MemoryOccasionTagStore(), client, agora: () => T0 } };
 }
 
 const azul = () => produto({ id: "azul", nome: "Caneca Azul", subprodutos: [sub("a1", "Azul", 1000, [[1, 9999, 10]])] });
@@ -78,11 +79,11 @@ describe("busca com o preço exato do site", () => {
   it("cotação diferente do índice: vale a cotação, o log registra preco_divergente e o grupo é corrigido em memória", async () => {
     const vistos: PrecoDivergente[] = [];
     setLogPrecos((e) => vistos.push(e));
-    const { client, index } = montar([azul()]);
+    const { client, indice } = montar([azul()]);
     client.precoVendaFixo.set("a1", 1100);
     await buscarProdutosHandler({ consulta: "caneca", quantidade: 50 }, createInitialState("5583999990000"), client);
     expect(vistos).toEqual([{ produto_id: "azul", grupo_preco: "", subproduto_id: "a1", quantidade: 50, indice: 1000, site: 1100 }]);
-    expect(index.carregar().produtos[0].subprodutos[0].faixas).toEqual([{ min: 1, max: 9999, preco: 11 }]);
+    expect(indice.produtos[0].subprodutos[0].faixas).toEqual([{ min: 1, max: 9999, preco: 11 }]);
   });
 
   it("sem quantidade: cota no pedido mínimo e o cartão diz que o preço é dele (spec §4.4)", async () => {

@@ -21,9 +21,9 @@ import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { config } from "../src/config.js";
-import { FileProductIndexStore, type ProdutoIndexado } from "../src/catalogo/indice.js";
-import { FileTipoStore, arquivoTiposPadrao, canonizarTipo } from "../src/catalogo/tipos.js";
-import { FileVectorStore, arquivosVetoresPadrao } from "../src/catalogo/vetores.js";
+import { abrirSemanticaHttp, carregarIndiceDeScript } from "../src/catalogo/abrir.js";
+import type { ProdutoIndexado } from "../src/catalogo/indice.js";
+import { canonizarTipo } from "../src/catalogo/tipos.js";
 import {
   MotorSemantico,
   pontuarCatalogo,
@@ -96,6 +96,8 @@ function topBm25(motor: IndiceBM25, consulta: string): string[] {
 
 const link = (p: ProdutoIndexado) => `https://presentesespeciais.com.br/brinde/${p.slug}`;
 
+let fecharBanco: (() => Promise<void>) | undefined;
+
 async function main() {
   const modo = config.brindeMe.mode === "http" ? "http" : "mock";
   const piso = numero("piso", PISO_TIPO_PADRAO);
@@ -110,18 +112,19 @@ async function main() {
   const arquivo = resolve(join(__dir, "../evals/recomendacao/consultas-semantica.json"));
   const consultas: ConsultaJson[] = JSON.parse(readFileSync(arquivo, "utf-8")).consultas;
 
-  const produtos = new FileProductIndexStore().carregar().produtos;
+  const produtos = (await carregarIndiceDeScript()).produtos;
   if (produtos.length === 0) {
     console.error(`${RED}✗${RESET} índice vazio. Rode antes: npm run sync:catalogo`);
     process.exit(1);
   }
 
-  const prod = arquivosVetoresPadrao("produto", modo);
-  const tipoArq = arquivosVetoresPadrao("tipo", modo);
+  const alvo = await abrirSemanticaHttp("comparar:busca");
+  if (!alvo) process.exit(1);
+  fecharBanco = alvo.fechar;
   const motor = new MotorSemantico({
-    vetoresProduto: new FileVectorStore(prod.bin, prod.meta),
-    vetoresTipo: new FileVectorStore(tipoArq.bin, tipoArq.meta),
-    tipos: new FileTipoStore(arquivoTiposPadrao(modo)),
+    vetoresProduto: alvo.vetoresProduto,
+    vetoresTipo: alvo.vetoresTipo,
+    tipos: alvo.tipos,
     embeddings: clienteEmbeddingsPadrao(config.openaiApiKey),
     piso,
     margem,
@@ -275,7 +278,9 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(`${RED}✗${RESET} comparação abortada: ${err instanceof Error ? err.message : String(err)}`);
-  process.exit(1);
-});
+main()
+  .finally(() => fecharBanco?.())
+  .catch((err) => {
+    console.error(`${RED}✗${RESET} comparação abortada: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  });

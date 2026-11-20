@@ -116,31 +116,8 @@ function aplicar(atual: IndiceCatalogo, novo: IndiceCatalogo): IndiceCatalogo {
 }
 
 export async function sincronizarPrecos(store: ProductIndexStore, consultar: ConsultaPreco, opcoes: OpcoesSyncPrecos = {}): Promise<ResultadoSyncPrecos> {
-  const r = await recalcularPrecos(store.carregar(), consultar, opcoes);
+  const r = await recalcularPrecos(await store.carregar(), consultar, opcoes);
   const gravou = r.grupos > 0 && r.falhas.length / r.grupos <= FRACAO_MAXIMA_DE_FALHAS;
-  if (gravou) store.salvar(aplicar(store.carregar(), r.indice));
+  if (gravou) await store.salvar(aplicar(await store.carregar(), r.indice));
   return { grupos: r.grupos, atualizados: r.atualizados, semPreco: r.semPreco, falhas: r.falhas, gravou };
-}
-
-interface IndiceV1 {
-  sincronizado_em: string;
-  completo: boolean;
-  produtos: Array<Omit<ProdutoIndexado, "subprodutos"> & { subprodutos: Array<{ id: string; sku: string; cor: string; estoque: number; faixas: FaixaPreco[] }> }>;
-}
-
-/** v1 (faixas de custo) → v2 sem custo: só limites e grupo; as faixas de venda vêm de recalcularPrecos. */
-export function esqueletoV2(v1: IndiceV1): IndiceCatalogo {
-  return {
-    versao: VERSAO_INDICE,
-    sincronizado_em: v1.sincronizado_em,
-    completo: v1.completo,
-    produtos: v1.produtos.map((p) => {
-      const custos = p.subprodutos.map((s) => s.faixas.map((f) => ({ min: f.min, max: f.max, price: f.preco })));
-      const ids = idsDeGrupo(custos.map(chaveDoGrupo));
-      return {
-        ...p,
-        subprodutos: p.subprodutos.map((s, i) => ({ id: s.id, sku: s.sku, cor: s.cor, estoque: s.estoque, faixas: [], limites: limitesDe(custos[i]), grupo_preco: ids[i], faixas_venda_em: "" })),
-      };
-    }),
-  };
 }

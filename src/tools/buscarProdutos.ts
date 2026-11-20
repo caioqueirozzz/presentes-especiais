@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { BrindeMeClient } from "../integrations/brindeme/client.js";
 import { discutirProduto, type ConversationState } from "../agent/state.js";
-import { FileProductIndexStore, type ProductIndexStore } from "../catalogo/indice.js";
+import type { IndiceCatalogo, ProductIndexStore } from "../catalogo/indice.js";
 import { FileOccasionTagStore, rotuloDaOcasiao, type OccasionTagStore } from "../catalogo/ocasioes.js";
 import { recomendar, type Ajuste, type Recomendacao } from "../catalogo/recomendar.js";
 import type { MotivoInelegivel } from "../catalogo/oferta.js";
@@ -9,10 +9,6 @@ import { cotou, guardarCotacoes, type Cotacao } from "../catalogo/cotacao.js";
 import { montarCartao } from "./cartao.js";
 import { arredondar } from "../integrations/brindeme/mappers.js";
 import { MotorSemantico } from "../catalogo/semantica.js";
-import { arquivosVetoresPadrao, FileVectorStore } from "../catalogo/vetores.js";
-import { arquivoTiposPadrao, FileTipoStore } from "../catalogo/tipos.js";
-import { clienteEmbeddingsPadrao } from "../llm/embeddings.js";
-import { config } from "../config.js";
 
 export const buscarProdutosSchema = z.object({
   consulta: z
@@ -45,12 +41,20 @@ export type BuscarProdutosInput = z.infer<typeof buscarProdutosSchema>;
 
 /** Injetáveis para teste; em produção lêem o índice sincronizado e a tabela da loja. */
 let indexPadrao: ProductIndexStore | null = null;
+/** O índice em uso: carregado uma vez e trocado só por `recarregarIndice`, nunca lido a cada pergunta. */
+let indiceCarregado: IndiceCatalogo | null = null;
 let tagsPadrao: OccasionTagStore | null = null;
 let semanticaPadrao: MotorSemantico | null = null;
-let semanticaMontada = false;
 
 export function setProductIndexStore(store: ProductIndexStore | null): void {
   indexPadrao = store;
+  indiceCarregado = null;
+}
+/** Relê o catálogo do store e passa a buscar nele. A partida e o sync chamam; a busca não. */
+export async function recarregarIndice(): Promise<IndiceCatalogo> {
+  if (!indexPadrao) throw new Error("store do catálogo não ligado: chame ligarStores(banco) na partida");
+  indiceCarregado = await indexPadrao.carregar();
+  return indiceCarregado;
 }
 export function setOccasionTagStore(store: OccasionTagStore | null): void {
   tagsPadrao = store;
@@ -58,36 +62,19 @@ export function setOccasionTagStore(store: OccasionTagStore | null): void {
 /** `null` desliga a busca semântica e devolve o BM25 (usado pelos testes e pelo modo de reserva). */
 export function setMotorSemantico(motor: MotorSemantico | null): void {
   semanticaPadrao = motor;
-  semanticaMontada = true;
 }
-function getIndex(): ProductIndexStore {
-  if (!indexPadrao) indexPadrao = new FileProductIndexStore();
-  return indexPadrao;
+async function getIndice(): Promise<IndiceCatalogo> {
+  if (indiceCarregado) return indiceCarregado;
+  if (!indexPadrao) throw new Error("store do catálogo não ligado: chame ligarStores(banco) na partida");
+  return indexPadrao.carregar();
 }
 function getTags(): OccasionTagStore {
   if (!tagsPadrao) tagsPadrao = new FileOccasionTagStore();
   return tagsPadrao;
 }
 
-/**
- * O motor é montado uma vez por processo. Sem OPENAI_API_KEY ele nem existe: a
- * busca segue lexical, como antes da busca semântica.
- */
+/** Sem motor ligado (`ligarSemantica`), a busca segue lexical (BM25). */
 function getSemantica(): MotorSemantico | undefined {
-  if (!semanticaMontada) {
-    semanticaMontada = true;
-    if (config.openaiApiKey) {
-      const modo = config.brindeMe.mode === "http" ? "http" : "mock";
-      const prod = arquivosVetoresPadrao("produto", modo);
-      const tipo = arquivosVetoresPadrao("tipo", modo);
-      semanticaPadrao = new MotorSemantico({
-        vetoresProduto: new FileVectorStore(prod.bin, prod.meta),
-        vetoresTipo: new FileVectorStore(tipo.bin, tipo.meta),
-        tipos: new FileTipoStore(arquivoTiposPadrao(modo)),
-        embeddings: clienteEmbeddingsPadrao(config.openaiApiKey),
-      });
-    }
-  }
   return semanticaPadrao ?? undefined;
 }
 
@@ -307,7 +294,7 @@ export async function buscarProdutosHandler(
       orcamentoTotal: input.orcamento_total,
       ocasiao: input.ocasiao,
     },
-    { index: getIndex(), tags: getTags(), client, semantica: getSemantica() }
+    { indice: await getIndice(), tags: getTags(), client, semantica: getSemantica() }
   );
 
   return formatar(recomendacao, input, state);

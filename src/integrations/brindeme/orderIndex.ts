@@ -9,17 +9,10 @@
  * Guarda só: id, código, telefone e e-mail normalizados, status e data.
  * Nada de CPF, endereço, boleto ou nota — esses nunca saem de `GET /order/{id}`,
  * que é consultado só depois da validação.
- *
- * Na Fase 2 o armazenamento é um arquivo JSON; a interface `OrderIndexStore`
- * existe para a Fase 5 trocar por Supabase sem tocar na lógica.
  */
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
 import type { BrindeMeClient } from "./client.js";
+import type { Banco } from "../../db/banco.js";
 import { normalizePhone } from "../../agent/state.js";
-
-const __dir = dirname(fileURLToPath(import.meta.url));
 
 export interface PedidoIndexado {
   id: string;
@@ -34,40 +27,40 @@ export interface PedidoIndexado {
 }
 
 export interface OrderIndexStore {
-  carregar(): PedidoIndexado[];
-  salvar(pedidos: PedidoIndexado[]): void;
-}
-
-export class FileOrderIndexStore implements OrderIndexStore {
-  private readonly file: string;
-
-  constructor(file = join(__dir, "../../../data/pedidos-index.json")) {
-    this.file = file;
-    mkdirSync(dirname(this.file), { recursive: true });
-  }
-
-  carregar(): PedidoIndexado[] {
-    if (!existsSync(this.file)) return [];
-    try {
-      const raw = JSON.parse(readFileSync(this.file, "utf-8"));
-      return Array.isArray(raw) ? (raw as PedidoIndexado[]) : [];
-    } catch {
-      return [];
-    }
-  }
-
-  salvar(pedidos: PedidoIndexado[]): void {
-    writeFileSync(this.file, JSON.stringify(pedidos, null, 2), "utf-8");
-  }
+  carregar(): Promise<PedidoIndexado[]>;
+  salvar(pedidos: PedidoIndexado[]): Promise<void>;
 }
 
 export class MemoryOrderIndexStore implements OrderIndexStore {
   constructor(private pedidos: PedidoIndexado[] = []) {}
-  carregar(): PedidoIndexado[] {
+  async carregar(): Promise<PedidoIndexado[]> {
     return this.pedidos;
   }
-  salvar(pedidos: PedidoIndexado[]): void {
+  async salvar(pedidos: PedidoIndexado[]): Promise<void> {
     this.pedidos = pedidos;
+  }
+}
+
+export class PgOrderIndexStore implements OrderIndexStore {
+  constructor(private readonly banco: Banco) {}
+
+  async carregar(): Promise<PedidoIndexado[]> {
+    return this.banco.query<PedidoIndexado>(
+      "SELECT id, codigo, telefone, email, status, criado_em, sincronizado_em FROM agente.pedidos ORDER BY criado_em, id"
+    );
+  }
+
+  async salvar(pedidos: PedidoIndexado[]): Promise<void> {
+    await this.banco.transacao(async (tx) => {
+      await tx.query("DELETE FROM agente.pedidos");
+      if (pedidos.length === 0) return;
+      await tx.query(
+        `INSERT INTO agente.pedidos (id, codigo, telefone, email, status, criado_em, sincronizado_em)
+         SELECT id, codigo, telefone, email, status, criado_em, sincronizado_em
+         FROM jsonb_to_recordset($1::jsonb) AS p(id TEXT, codigo TEXT, telefone TEXT, email TEXT, status TEXT, criado_em TEXT, sincronizado_em TEXT)`,
+        [JSON.stringify(pedidos)]
+      );
+    });
   }
 }
 
@@ -106,7 +99,7 @@ export async function sincronizarPedidos(
   const fim = new Date();
   const inicio = new Date(fim.getTime() - dias * 24 * 60 * 60 * 1000);
 
-  const existentes = new Map(store.carregar().map((p) => [p.id, p]));
+  const existentes = new Map((await store.carregar()).map((p) => [p.id, p]));
   const agora = new Date().toISOString();
 
   let lidos = 0;
@@ -142,7 +135,7 @@ export async function sincronizarPedidos(
     if (lote.data.length === 0 || pagina >= ultima) break;
   }
 
-  store.salvar([...existentes.values()]);
+  await store.salvar([...existentes.values()]);
   return { lidos, novos, atualizados, paginas: pagina };
 }
 
@@ -158,12 +151,12 @@ export interface BuscaPedido {
  *
  * Nunca devolve dado do pedido — só o id e se validou.
  */
-export function localizarPedido(
+export async function localizarPedido(
   store: OrderIndexStore,
   busca: BuscaPedido
-): { encontrado: false } | { encontrado: true; id: string; validado: boolean } {
+): Promise<{ encontrado: false } | { encontrado: true; id: string; validado: boolean }> {
   const codigo = busca.codigo.trim().replace(/^#/, "");
-  const pedido = store.carregar().find((p) => p.codigo === codigo);
+  const pedido = (await store.carregar()).find((p) => p.codigo === codigo);
   if (!pedido) return { encontrado: false };
 
   const telefoneBate =

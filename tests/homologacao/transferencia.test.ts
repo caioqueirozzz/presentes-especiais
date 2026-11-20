@@ -84,7 +84,7 @@ describe("H4 — transferência humana", () => {
     expect(r.modo).toBe("humano");
     expect(r.avisoAtendente).toMatch(/o modelo falhou duas vezes/);
     // A mensagem do cliente não se perde.
-    expect(b.repo.carregar(TEL).estado.historico.filter((m) => m.content === "oi")).toHaveLength(1);
+    expect((await b.repo.carregar(TEL)).estado.historico.filter((m) => m.content === "oi")).toHaveLength(1);
   });
 
   it("H4.6 turno que passa do teto de tempo → pessoa assume", async () => {

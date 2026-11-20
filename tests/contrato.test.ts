@@ -270,7 +270,7 @@ describe("contrato — catálogo: listagem real → índice → recomendação",
   it("o registro do índice guarda só o necessário para recomendar", async () => {
     const store = new MemoryProductIndexStore();
     await sincronizarCatalogo(stubApi(), store);
-    const [registro] = store.carregar().produtos;
+    const [registro] = (await store.carregar()).produtos;
     expect(Object.keys(registro).sort()).toEqual(
       [
         "ausencias", "atualizado_em", "categorias", "codigo", "descricao", "destaque", "id",

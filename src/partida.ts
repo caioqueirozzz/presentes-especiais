@@ -1,5 +1,6 @@
 import type { BrindeMeClient } from "./integrations/brindeme/client.js";
-import { FileProductIndexStore } from "./catalogo/indice.js";
+import type { ProductIndexStore } from "./catalogo/indice.js";
+import { recarregarIndice } from "./tools/buscarProdutos.js";
 import { sobDemandaAusentes } from "./catalogo/sobDemanda.js";
 import { garantirIndice } from "./catalogo/garantirIndice.js";
 import { carregarBase } from "./knowledge/base.js";
@@ -10,7 +11,7 @@ const YELLOW = "\x1b[33m";
 const RESET = "\x1b[0m";
 
 /** Estado da base de conhecimento e do índice de catálogo, antes de atender. */
-export async function avisarConhecimentoECatalogo(client: BrindeMeClient): Promise<void> {
+export async function avisarConhecimentoECatalogo(client: BrindeMeClient, store: ProductIndexStore): Promise<void> {
   const { base, problemas } = carregarBase({ incluirRascunhos: config.conhecimento.incluirRascunhos });
   const e = base.estatisticas();
   console.log(
@@ -24,9 +25,10 @@ export async function avisarConhecimentoECatalogo(client: BrindeMeClient): Promi
   for (const p of problemas) console.log(`${YELLOW}! ${p.arquivo}${p.item ? ` · ${p.item}` : ""}: ${p.mensagem}${RESET}`);
 
   try {
-    const s = await garantirIndice(client, new FileProductIndexStore(), {
+    const s = await garantirIndice(client, store, {
       autoSincronizar: config.brindeMe.mode === "mock",
     });
+    await recarregarIndice();
     if (s.situacao === "vazio") {
       console.log(`${YELLOW}! índice de catálogo vazio — buscar_produtos vai falhar. Rode: npm run sync:catalogo${RESET}`);
     } else if (s.situacao === "antigo") {
@@ -37,7 +39,7 @@ export async function avisarConhecimentoECatalogo(client: BrindeMeClient): Promi
       console.log(`${GRAY}Índice de catálogo: ${s.produtos} produto(s), sincronizado há ${s.idadeHoras < 1 ? "menos de 1" : Math.round(s.idadeHoras)}h${RESET}`);
     }
     if (config.brindeMe.mode === "http") {
-      const noIndice = new Set(new FileProductIndexStore().carregar().produtos.map((p) => p.id));
+      const noIndice = new Set((await store.carregar()).produtos.map((p) => p.id));
       for (const p of sobDemandaAusentes(noIndice)) {
         console.log(`${YELLOW}! sob demanda: "${p.nome}" (${p.id}) não está no índice do catálogo${RESET}`);
       }

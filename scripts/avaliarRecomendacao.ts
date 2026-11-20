@@ -19,7 +19,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { createBrindeMeClient } from "../src/integrations/brindeme/factory.js";
-import { FileProductIndexStore } from "../src/catalogo/indice.js";
+import { carregarIndiceDeScript } from "../src/catalogo/abrir.js";
 import { FileOccasionTagStore } from "../src/catalogo/ocasioes.js";
 import { recomendar, type PedidoRecomendacao, type Recomendacao } from "../src/catalogo/recomendar.js";
 import { verificarSugestao } from "../src/catalogo/verificacao.js";
@@ -65,9 +65,8 @@ async function main() {
   const pedidos: PedidoJson[] = JSON.parse(readFileSync(arquivo, "utf-8")).pedidos;
 
   const client = createBrindeMeClient({ reqPorMinuto: config.catalogo.reqPorMinuto });
-  const index = new FileProductIndexStore();
   const tags = new FileOccasionTagStore();
-  const indice = index.carregar();
+  const indice = await carregarIndiceDeScript();
 
   if (indice.produtos.length === 0) {
     console.error(`${RED}✗${RESET} índice de catálogo vazio. Rode antes: npm run sync:catalogo`);
@@ -93,7 +92,7 @@ async function main() {
       orcamentoTotal: p.orcamento_total,
       ocasiao: p.ocasiao,
     };
-    const r: Recomendacao = await recomendar(pedido, { index, tags, client });
+    const r: Recomendacao = await recomendar(pedido, { indice, tags, client });
 
     const parametros = [
       `consulta "${p.consulta}"`,

@@ -3,9 +3,8 @@
  * A conversa passa pelo AgenteDefinitivo (o mesmo da produção), com as ferramentas e a API de mock reais;
  * só o modelo é roteirizado. Cada teste é uma jornada de cliente do roteiro de homologação (docs/fase-6).
  */
-import { mkdtempSync } from "fs";
-import { tmpdir } from "os";
 import { join } from "path";
+import { MemoriaConversas } from "../../src/conversas/armazem.js";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   TEL,
@@ -76,7 +75,7 @@ describe("H1 — fluxos completos", () => {
     expect(r5.avisoAtendente).toContain("Orçamento para emitir");
     expect(r5.avisoAtendente).toContain("compras@empresa.com");
 
-    const conversa = b.repo.carregar(TEL);
+    const conversa = await b.repo.carregar(TEL);
     expect(conversa.estado.fichaPedido).toBeUndefined();
     expect(conversa.estado.cliente).toMatchObject({ tipo: "PJ", nome: "Empresa Teste Ltda" });
     expect(conversa.estado.modo).toBe("humano");
@@ -105,7 +104,7 @@ describe("H1 — fluxos completos", () => {
     );
     await b.enviar("100 canecas pretas, Maria Souza, maria@teste.com");
 
-    const conversa = b.repo.carregar(TEL);
+    const conversa = await b.repo.carregar(TEL);
     const pendente = conversa.estado.fichaPedido!;
     expect(pendente.resumo.arte_refs).toHaveLength(1);
     // 100 pretas: faixa 100–499 da cor preta = 16,40 (a branca seria 15,40).
@@ -141,8 +140,8 @@ describe("H1 — fluxos completos", () => {
   });
 
   it("H1.5 o agente reinicia entre o resumo e a confirmação: a confirmação ainda envia a ficha", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "homolog-reinicio-"));
-    const antes = await montarBancada({ repoDir: dir });
+    const armazem = new MemoriaConversas();
+    const antes = await montarBancada({ armazem });
     antes.llm.roteiro(
       toolUse("detalhar_produto", { produto_id: "prod-003" }),
       toolUse("preparar_orcamento", {
@@ -156,14 +155,14 @@ describe("H1 — fluxos completos", () => {
     await antes.enviar("30 garrafas térmicas pretas, Carlos Lima, carlos@teste.com");
 
     // Processo novo, mesmo disco: a conversa volta do arquivo.
-    const depois = await montarBancada({ repoDir: dir });
+    const depois = await montarBancada({ armazem });
     depois.llm.roteiro(
       toolUse("transferir_humano", { motivo: "orcamento_para_emitir", prioridade: "normal" }),
       endTurn("Enviei para a equipe.")
     );
     const r = await depois.enviar("confirmo");
     expect(r.avisoAtendente).toContain("Carlos Lima");
-    expect(depois.repo.carregar(TEL).estado.modo).toBe("humano");
+    expect((await depois.repo.carregar(TEL)).estado.modo).toBe("humano");
   });
 
   it("H1.6 mesma mensagem reenviada pela ponte (mesmo turnoId) não roda o modelo de novo", async () => {

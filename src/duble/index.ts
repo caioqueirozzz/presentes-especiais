@@ -4,6 +4,9 @@ import type { Agente } from "../contrato/agente.js";
 import { criarServidorAgente } from "../contrato/servidorHttp.js";
 import { createBrindeMeClient } from "../integrations/brindeme/factory.js";
 import { criarLLM } from "../llm/index.js";
+import { abrirBanco } from "../db/banco.js";
+import { ligarSemantica, ligarStores } from "../db/stores.js";
+import { ligarEstadoSistema } from "../controle/estadoSistema.js";
 import { exigirAmbiente } from "../operacao/exigirAmbiente.js";
 import { avisarConhecimentoECatalogo } from "../partida.js";
 import { AgenteDireto } from "./direto.js";
@@ -20,10 +23,14 @@ async function main(): Promise<void> {
   if (modo === "eco") {
     agente = new AgenteEco();
   } else if (modo === "direto") {
-    exigirAmbiente("agente");
+    const banco = await abrirBanco();
+    await ligarEstadoSistema(banco);
+    const catalogo = ligarStores(banco);
+    exigirAmbiente("agente", process.env, (await catalogo.carregar()).produtos.length);
     const client = createBrindeMeClient();
     console.log(`API da loja: ${config.brindeMe.mode}`);
-    await avisarConhecimentoECatalogo(client);
+    await avisarConhecimentoECatalogo(client, catalogo);
+    await ligarSemantica(banco, catalogo);
     agente = new AgenteDireto(criarLLM(), client);
   } else {
     console.error(`--modo inválido: ${modo} (use eco ou direto)`);

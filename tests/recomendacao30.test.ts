@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { MemoryProductIndexStore, sincronizarCatalogo } from "../src/catalogo/indice.js";
+import { MemoryProductIndexStore, sincronizarCatalogo, type IndiceCatalogo } from "../src/catalogo/indice.js";
 import { MemoryOccasionTagStore } from "../src/catalogo/ocasioes.js";
 import { recomendar, MAX_OPCOES, type PedidoRecomendacao } from "../src/catalogo/recomendar.js";
 import { verificarSugestao } from "../src/catalogo/verificacao.js";
@@ -39,13 +39,14 @@ const T0 = new Date("2026-10-14T10:00:00Z");
 
 describe("30 pedidos de recomendação", () => {
   let client: ClienteCatalogoFalso;
-  let index: MemoryProductIndexStore;
+  let indice: IndiceCatalogo;
   const tags = new MemoryOccasionTagStore();
 
   beforeAll(async () => {
     client = new ClienteCatalogoFalso(gerarCatalogo(400, 7));
-    index = new MemoryProductIndexStore();
+    const index = new MemoryProductIndexStore();
     await sincronizarCatalogo(client, index, { agora: T0 });
+    indice = await index.carregar();
   });
 
   it("há 30 pedidos", () => {
@@ -64,7 +65,7 @@ describe("30 pedidos de recomendação", () => {
   for (const caso of pedidos) {
     it(`${caso.id} — ${caso.pedido}`, async () => {
       const pedido = deJson(caso);
-      const r = await recomendar(pedido, { index, tags, client, agora: () => T0 });
+      const r = await recomendar(pedido, { indice, tags, client, agora: () => T0 });
 
       if (r.tipo === "encontrados") {
         expect(r.itens.length).toBeGreaterThan(0);
@@ -100,7 +101,7 @@ describe("30 pedidos de recomendação", () => {
             novo.precoMaxUnitario = a.preco_unitario_minimo;
             novo.orcamentoTotal = undefined;
           }
-          const depois = await recomendar(novo, { index, tags, client, agora: () => T0 });
+          const depois = await recomendar(novo, { indice, tags, client, agora: () => T0 });
           expect(depois.tipo, `ajuste ${a.tipo} não fecha`).toBe("encontrados");
           if (depois.tipo === "encontrados") {
             expect(depois.itens.map((i) => i.produto.id)).toContain(a.produto_id);
@@ -115,7 +116,7 @@ describe("30 pedidos de recomendação", () => {
   it("a maioria dos pedidos tem resposta (o teste não é vazio)", async () => {
     let comResposta = 0;
     for (const caso of pedidos) {
-      const r = await recomendar(deJson(caso), { index, tags, client, agora: () => T0 });
+      const r = await recomendar(deJson(caso), { indice, tags, client, agora: () => T0 });
       if (r.tipo === "encontrados") comResposta++;
     }
     expect(comResposta).toBeGreaterThanOrEqual(20);
@@ -123,7 +124,7 @@ describe("30 pedidos de recomendação", () => {
 
   it("o pedido impossível ('carro elétrico') não inventa produto", async () => {
     const caso = pedidos.find((p) => p.consulta === "carro elétrico")!;
-    const r = await recomendar(deJson(caso), { index, tags, client, agora: () => T0 });
+    const r = await recomendar(deJson(caso), { indice, tags, client, agora: () => T0 });
     expect(r).toMatchObject({ tipo: "nenhum", motivo: "sem_correspondencia" });
   });
 });
@@ -131,14 +132,14 @@ describe("30 pedidos de recomendação", () => {
 describe("desempenho com o tamanho do catálogo real", () => {
   it("busca em 6.535 produtos responde em tempo de conversa", async () => {
     const produtos = gerarCatalogo(6535, 11);
-    const index = new MemoryProductIndexStore({
+    const indice = {
       versao: 1,
       sincronizado_em: T0.toISOString(),
       completo: true,
       produtos: produtos.filter((p) => p.status).map((p) => construirRegistro(p, T0)),
-    });
+    };
     const client = new ClienteCatalogoFalso(produtos);
-    const deps = { index, tags: new MemoryOccasionTagStore(), client, agora: () => T0 };
+    const deps = { indice, tags: new MemoryOccasionTagStore(), client, agora: () => T0 };
 
     await recomendar({ consulta: "caneca", quantidade: 100 }, deps); // monta o índice BM25 (1ª vez)
 

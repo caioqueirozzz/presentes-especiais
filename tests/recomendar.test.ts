@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { MemoryProductIndexStore, sincronizarCatalogo } from "../src/catalogo/indice.js";
+import { indiceVazio, MemoryProductIndexStore, sincronizarCatalogo } from "../src/catalogo/indice.js";
 import { MemoryOccasionTagStore } from "../src/catalogo/ocasioes.js";
 import { recomendar, MAX_OPCOES, type Recomendacao, type PedidoRecomendacao } from "../src/catalogo/recomendar.js";
 import { ApiError } from "../src/integrations/brindeme/errors.js";
@@ -77,8 +77,9 @@ async function montar(produtos = catalogoBase()) {
   const index = new MemoryProductIndexStore();
   await sincronizarCatalogo(client, index, { agora: T0 });
   const tags = new MemoryOccasionTagStore();
-  const buscar = (pedido: PedidoRecomendacao) => recomendar(pedido, { index, tags, client, agora: () => T0 });
-  return { client, index, tags, buscar };
+  const indice = await index.carregar();
+  const buscar = (pedido: PedidoRecomendacao) => recomendar(pedido, { indice, tags, client, agora: () => T0 });
+  return { client, indice, tags, buscar };
 }
 
 function encontrados(r: Recomendacao) {
@@ -386,7 +387,7 @@ describe("recomendar — índice", () => {
   it("índice vazio é sinalizado, não vira 'nenhum produto'", async () => {
     const client = new ClienteCatalogoFalso([]);
     const r = await recomendar({ consulta: "caneca" }, {
-      index: new MemoryProductIndexStore(),
+      indice: indiceVazio(),
       tags: new MemoryOccasionTagStore(),
       client,
     });
@@ -394,10 +395,10 @@ describe("recomendar — índice", () => {
   });
 
   it("etiquetas da loja (tabela) valem sem nova sincronização", async () => {
-    const { client, index } = await montar();
+    const { client, indice } = await montar();
     const tags = new MemoryOccasionTagStore({ porCategoria: { Papelaria: ["dia-das-maes"] } });
     const r = encontrados(
-      await recomendar({ consulta: "algo para o dia das mães", quantidade: 60 }, { index, tags, client })
+      await recomendar({ consulta: "algo para o dia das mães", quantidade: 60 }, { indice, tags, client })
     );
     expect(r.itens.map((i) => i.produto.id)).toContain("caderno");
   });

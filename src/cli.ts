@@ -8,6 +8,9 @@ import { createBrindeMeClient } from "./integrations/brindeme/factory.js";
 import { Logger } from "./logging/logger.js";
 import { config } from "./config.js";
 import type { FaultType } from "./integrations/brindeme/types.js";
+import { abrirBanco } from "./db/banco.js";
+import { ligarSemantica, ligarStores } from "./db/stores.js";
+import { ligarEstadoSistema } from "./controle/estadoSistema.js";
 import { avisarConhecimentoECatalogo } from "./partida.js";
 
 const GRAY = "\x1b[90m";
@@ -27,6 +30,9 @@ function parseArgs(): { telefone: string } {
 
 async function main() {
   const { telefone } = parseArgs();
+  const banco = await abrirBanco();
+  await ligarEstadoSistema(banco);
+  const catalogo = ligarStores(banco);
   const client = createBrindeMeClient();
   const llm = criarLLM();
   let state = createInitialState(telefone);
@@ -37,7 +43,8 @@ async function main() {
   console.log(`${GRAY}Comandos: /arte <arquivo>, /estado, /falha <tipo> [n], /humano, /retomar [nota], /reset, /sair${RESET}`);
   console.log(`${GRAY}────────────────────────────────────────${RESET}\n`);
 
-  await avisarConhecimentoECatalogo(client);
+  await avisarConhecimentoECatalogo(client, catalogo);
+  await ligarSemantica(banco, catalogo);
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
@@ -51,6 +58,7 @@ async function main() {
     if (trimmed === "/sair") {
       console.log(`${GRAY}Encerrando...${RESET}`);
       rl.close();
+      await banco.fechar();
       process.exit(0);
     }
 

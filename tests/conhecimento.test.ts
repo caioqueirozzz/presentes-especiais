@@ -10,7 +10,6 @@ import {
   type ItemBase,
 } from "../src/knowledge/base.js";
 import {
-  FileLacunaStore,
   MemoryLacunaStore,
   agruparLacunas,
   criarLacuna,
@@ -319,7 +318,7 @@ describe("ferramenta consultar_conhecimento", () => {
     expect(Object.keys(r.itens[0]).sort()).toEqual(["categoria", "conteudo", "id", "titulo"]);
     expect(JSON.stringify(r)).not.toMatch(/RECADO INTERNO|Fulano|aprovado_por/);
     expect(r.regra).toMatch(/só o conteúdo/);
-    expect(lacunas.listar()).toEqual([]);
+    expect(await lacunas.listar()).toEqual([]);
   });
 
   it("sem resposta na base: manda transferir com o motivo certo e registra a lacuna", async () => {
@@ -332,8 +331,8 @@ describe("ferramenta consultar_conhecimento", () => {
       motivo_sugerido: "lacuna_conhecimento",
     });
     expect(MOTIVOS).toContain("lacuna_conhecimento");
-    expect(lacunas.listar()).toHaveLength(1);
-    expect(lacunas.listar()[0]).toMatchObject({ pergunta: "qual o CNPJ da loja?", conversa_id: state.conversaId });
+    expect(await lacunas.listar()).toHaveLength(1);
+    expect((await lacunas.listar())[0]).toMatchObject({ pergunta: "qual o CNPJ da loja?", conversa_id: state.conversaId });
   });
 
   it("lacuna não é falha de API (não conta para o disjuntor de falhas seguidas)", async () => {
@@ -351,7 +350,7 @@ describe("ferramenta consultar_conhecimento", () => {
       createInitialState("5583999990000"),
       client
     );
-    const salva = lacunas.listar()[0].pergunta;
+    const salva = (await lacunas.listar())[0].pergunta;
     expect(salva).not.toMatch(/123\.456\.789-09|ana\.souza@gmail\.com|83999990000/);
     expect(salva).toMatch(/\*\*\*/);
   });
@@ -386,20 +385,6 @@ describe("lacunas", () => {
     ]);
     expect(g).toHaveLength(1);
     expect(g[0]).toMatchObject({ ocorrencias: 3, conversas: 2 });
-  });
-
-  it("arquivo: grava em JSONL, relê e ignora linha truncada", () => {
-    const dir = mkdtempSync(join(tmpdir(), "lac-"));
-    const file = join(dir, "sub", "lacunas.jsonl");
-    const store = new FileLacunaStore(file);
-    expect(store.listar()).toEqual([]);
-
-    store.registrar(criarLacuna("pergunta 1", "c1"));
-    store.registrar(criarLacuna("pergunta 2", "c2"));
-    writeFileSync(file, readFileSync(file, "utf-8") + '{"pergunta": "trunc', "utf-8");
-
-    expect(existsSync(file)).toBe(true);
-    expect(store.listar().map((l) => l.pergunta)).toEqual(["pergunta 1", "pergunta 2"]);
   });
 
   it("pergunta longa é cortada", () => {

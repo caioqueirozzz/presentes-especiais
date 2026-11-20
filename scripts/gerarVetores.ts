@@ -5,22 +5,16 @@
  *   npm run gerar:vetores -- --forcar     # rotula e vetoriza tudo de novo
  *   npm run gerar:vetores -- --concorrencia 3
  *
- * Lê o índice já sincronizado (`data/produtos-index.json`) e grava:
- *   data/tipos-produto.json      — produto_id → tipo canônico
- *   data/vetores-produto.bin/.json — um vetor por produto
- *   data/vetores-tipo.bin/.json    — um vetor por tipo distinto
- *
- * No mock os arquivos ganham o sufixo `-mock`, como o índice.
+ * Lê o índice já sincronizado e grava no banco (schema agente): agente.tipos_produto,
+ * agente.vetores_produto e agente.vetores_tipo. Só roda em BRINDEME_MODE=http: no mock
+ * os vetores nascem em memória a cada partida e nunca vão ao banco.
  *
  * Com mais de 5% dos produtos sem rótulo ou sem vetor, NADA é gravado e o
  * processo sai com código 1: catálogo meio rotulado esconde produto do cliente.
  */
 import "dotenv/config";
-import { relative } from "path";
 import { config } from "../src/config.js";
-import { arquivoIndicePadrao, FileProductIndexStore } from "../src/catalogo/indice.js";
-import { arquivoTiposPadrao, FileTipoStore } from "../src/catalogo/tipos.js";
-import { arquivosVetoresPadrao, FileVectorStore } from "../src/catalogo/vetores.js";
+import { abrirSemanticaHttp, carregarIndiceDeScript } from "../src/catalogo/abrir.js";
 import { gerarTiposEVetores, MAX_FALHAS } from "../src/catalogo/geracao.js";
 import { clienteEmbeddingsPadrao } from "../src/llm/embeddings.js";
 import { clienteRotuloPadrao, CONCORRENCIA_ROTULO } from "../src/llm/rotulador.js";
@@ -53,27 +47,39 @@ export async function gerarEImprimir(opcoesCli: { forcar?: boolean; concorrencia
     return false;
   }
 
-  const modo = config.brindeMe.mode === "http" ? "http" : "mock";
-  const indice = new FileProductIndexStore().carregar();
+  const alvo = await abrirSemanticaHttp("gerar:vetores");
+  if (!alvo) return false;
+  try {
+    return await gerar(alvo, forcar, concorrencia);
+  } finally {
+    await alvo.fechar();
+  }
+}
+
+async function gerar(
+  alvo: NonNullable<Awaited<ReturnType<typeof abrirSemanticaHttp>>>,
+  forcar: boolean,
+  concorrencia: number
+): Promise<boolean> {
+  const modo = "http";
+  const indice = await carregarIndiceDeScript();
   if (indice.produtos.length === 0) {
-    console.error(`${RED}✗${RESET} índice vazio (${relative(process.cwd(), arquivoIndicePadrao(modo))}). Rode npm run sync:catalogo antes.`);
+    console.error(`${RED}✗${RESET} índice vazio. Rode npm run sync:catalogo antes.`);
     return false;
   }
 
   console.log(`${BOLD}Tipos e vetores do catálogo — ${config.storeName}${RESET}`);
   console.log(`${GRAY}  modo: ${modo} · ${indice.produtos.length} produto(s) · concorrência: ${concorrencia}${forcar ? " · forçado" : ""}${RESET}\n`);
 
-  const produtoVet = arquivosVetoresPadrao("produto", modo);
-  const tipoVet = arquivosVetoresPadrao("tipo", modo);
   const inicio = Date.now();
   let ultimaLinha = "";
 
   const r = await gerarTiposEVetores(
     indice.produtos,
     {
-      tipos: new FileTipoStore(arquivoTiposPadrao(modo)),
-      vetoresProduto: new FileVectorStore(produtoVet.bin, produtoVet.meta),
-      vetoresTipo: new FileVectorStore(tipoVet.bin, tipoVet.meta),
+      tipos: alvo.tipos,
+      vetoresProduto: alvo.vetoresProduto,
+      vetoresTipo: alvo.vetoresTipo,
       embeddings: clienteEmbeddingsPadrao(config.openaiApiKey),
       rotulos: clienteRotuloPadrao(config.openaiApiKey),
     },
@@ -100,7 +106,7 @@ export async function gerarEImprimir(opcoesCli: { forcar?: boolean; concorrencia
     console.error(
       `${RED}✗${RESET} ${r.falhas.length} de ${r.produtos} produto(s) (${pct}%) ficaram sem rótulo ou sem vetor — acima do limite de ${MAX_FALHAS * 100}%.`
     );
-    console.error(`${RED}  Nada foi gravado: os arquivos anteriores continuam valendo.${RESET}`);
+    console.error(`${RED}  Nada foi gravado: o que já estava no banco continua valendo.${RESET}`);
     for (const f of r.falhas.slice(0, 20)) console.error(`${GRAY}    ${f.id} · ${f.nome}: ${f.erro}${RESET}`);
     if (r.falhas.length > 20) console.error(`${GRAY}    … e mais ${r.falhas.length - 20}${RESET}`);
     return false;
@@ -109,7 +115,7 @@ export async function gerarEImprimir(opcoesCli: { forcar?: boolean; concorrencia
   console.log(`${GREEN}✓${RESET} ${r.produtos} produto(s) · ${r.tiposDistintos} tipo(s) distinto(s)`);
   console.log(`${GRAY}  rótulos novos: ${r.rotulados} · reaproveitados: ${r.reaproveitadosRotulo}${RESET}`);
   console.log(`${GRAY}  vetores novos: ${r.vetorizados} · reaproveitados: ${r.reaproveitadosVetor}${RESET}`);
-  console.log(`${GRAY}  ${relative(process.cwd(), arquivoTiposPadrao(modo))} · ${relative(process.cwd(), produtoVet.bin)} · ${segundos}s${RESET}`);
+  console.log(`${GRAY}  gravado no banco (agente.tipos_produto, vetores_produto, vetores_tipo) · ${segundos}s${RESET}`);
 
   if (r.falhas.length > 0) {
     console.log(`${YELLOW}!${RESET} ${r.falhas.length} produto(s) ficaram de fora (dentro do limite); entram pelo BM25 até a próxima geração:`);
@@ -128,7 +134,7 @@ if (chamadoDireto) {
       if (!ok) process.exit(1);
     })
     .catch((err) => {
-      console.error(`${RED}✗${RESET} geração abortada, arquivos anteriores preservados: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`${RED}✗${RESET} geração abortada, o que estava no banco foi preservado: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     });
 }

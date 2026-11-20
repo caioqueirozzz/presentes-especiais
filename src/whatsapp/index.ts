@@ -1,17 +1,24 @@
 import "dotenv/config";
 import { config } from "../config.js";
+import { MSG_SUSPENSO } from "../operacao/verificacaoAmbiente.js";
 import { exigirAmbiente } from "../operacao/exigirAmbiente.js";
+import { PgConversas } from "../conversas/armazem.js";
+import { lerEstadoSistema, ligarEstadoSistema } from "../controle/estadoSistema.js";
+import { abrirBanco } from "../db/banco.js";
 import { criarClienteHttp } from "./agenteHttp.js";
 import { iniciarControle } from "./controle.js";
 import { ObservadorCrm } from "./crm.js";
-import { ArquivoEstadoPonte } from "./estadoPonte.js";
+import { PgEstadoPonte } from "./estadoPonte.js";
 import { criarLogPonte } from "./log.js";
-import { ArquivoModoLia, configLiaPadrao } from "./modoLia.js";
+import { PgModoLia, configLiaPadrao } from "./modoLia.js";
 import { Ponte } from "./ponte.js";
 import { CanalWwebjs } from "./sessao.js";
 
 async function main(): Promise<void> {
   exigirAmbiente("ponte");
+  const banco = await abrirBanco();
+  await ligarEstadoSistema(banco);
+  if (lerEstadoSistema().suspenso) console.warn(`! estado-sistema: ${MSG_SUSPENSO}`);
   const w = config.whatsapp;
   const log = criarLogPonte();
   const crmLigado = Boolean(config.crm.url && config.crm.segredo.length >= 16);
@@ -22,6 +29,8 @@ async function main(): Promise<void> {
     ...(w.parearTelefone ? { parearTelefone: w.parearTelefone } : {}),
     ...(w.versaoWeb ? { versaoWeb: w.versaoWeb } : {}),
   });
+  const armazem = new PgEstadoPonte(banco, log);
+  const estadoInicial = await armazem.carregar();
   const ponte = new Ponte(
     canal,
     criarClienteHttp(config.agente.url, w.agenteTimeoutMs),
@@ -31,13 +40,14 @@ async function main(): Promise<void> {
       lote: { silencioMs: w.loteSilencioMs, maxMs: w.loteMaxMs, maxMensagens: w.loteMaxMensagens },
       avisoInstabilidadeMs: w.avisoInstabilidadeMin * 60_000,
       enviosPorMinuto: w.enviosPorMinuto,
-      armazem: new ArquivoEstadoPonte(w.estadoArquivo, log),
-      ...(crmLigado ? { observador: new ObservadorCrm(config.crm.url, config.crm.segredo, config.agente.conversasDir, log) } : {}),
+      armazem,
+      estadoInicial,
+      ...(crmLigado ? { observador: new ObservadorCrm(config.crm.url, config.crm.segredo, (t) => new PgConversas(banco).ler(t), log) } : {}),
     },
     log
   );
-  const lia = new ArquivoModoLia(w.modoLiaArquivo, configLiaPadrao(w.liberados));
-  const modo = lia.ler();
+  const lia = new PgModoLia(banco, configLiaPadrao(w.liberados));
+  const modo = await lia.ler();
   ponte.definirModoLia(modo);
   ponte.iniciar(w.varreduraMs);
   if (crmLigado) {
@@ -49,8 +59,11 @@ async function main(): Promise<void> {
   if (modo.modo === "teste") console.log(`Lia em modo teste: respondendo só a ${modo.numerosTeste.join(", ")}`);
   else if (modo.modo === "desligada") console.log("Lia desligada: as mensagens chegam ao CRM, mas ninguém é respondido pela IA.");
   const sair = () => {
-    ponte.salvarAgora();
-    void canal.encerrar().finally(() => process.exit(0));
+    void ponte
+      .salvarAgora()
+      .finally(() => canal.encerrar())
+      .finally(() => banco.fechar())
+      .finally(() => process.exit(0));
   };
   process.once("SIGINT", sair);
   process.once("SIGTERM", sair);

@@ -1,6 +1,5 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "fs";
-import { tmpdir } from "os";
+import { describe, it, expect } from "vitest";
+import { writeFileSync, readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import {
@@ -9,9 +8,7 @@ import {
   cossenoNaLinha,
   montarConjunto,
   vetorDe,
-  FileVectorStore,
   MemoryVectorStore,
-  arquivosVetoresPadrao,
 } from "../src/catalogo/vetores.js";
 import {
   canonizarTipo,
@@ -20,7 +17,6 @@ import {
   tipoDoProduto,
   mapaDeTipos,
   tiposDistintos,
-  FileTipoStore,
   MemoryTipoStore,
   tabelaTiposVazia,
   type TabelaTipos,
@@ -28,17 +24,6 @@ import {
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ARQUIVO_CORRECOES = join(__dir, "../src/knowledge/tipos-corrigidos.json");
-
-const dirs: string[] = [];
-function tmp(): string {
-  const d = mkdtempSync(join(tmpdir(), "vetores-"));
-  dirs.push(d);
-  return d;
-}
-
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
 
 describe("matemática dos vetores", () => {
   it("normalizar deixa a norma em 1", () => {
@@ -78,68 +63,6 @@ describe("matemática dos vetores", () => {
     });
     expect([...(vetorDe(c, "b") ?? [])]).toEqual([0, 1]);
     expect(vetorDe(c, "z")).toBeNull();
-  });
-});
-
-describe("FileVectorStore", () => {
-  const partes = {
-    modelo: "text-embedding-3-small",
-    dimensao: 3,
-    gerado_em: "2026-11-16T12:00:00.000Z",
-    ids: ["p1", "p2"],
-    origem: { p1: "2026-11-01", p2: "2026-11-02" },
-    matriz: Float32Array.from([1, 0, 0, 0, 1, 0]),
-  };
-
-  it("grava e lê de volta o mesmo conjunto", async () => {
-    const d = tmp();
-    const store = new FileVectorStore(join(d, "v.bin"), join(d, "v.json"));
-    await store.salvar(partes);
-
-    const lido = await new FileVectorStore(join(d, "v.bin"), join(d, "v.json")).carregar();
-    expect(lido).not.toBeNull();
-    expect(lido!.ids).toEqual(["p1", "p2"]);
-    expect(lido!.modelo).toBe("text-embedding-3-small");
-    expect(lido!.dimensao).toBe(3);
-    expect(lido!.origem.p2).toBe("2026-11-02");
-    expect([...lido!.matriz]).toEqual([1, 0, 0, 0, 1, 0]);
-    expect(vetorDe(lido!, "p2")).not.toBeNull();
-  });
-
-  it("sem arquivo devolve null (a busca cai no BM25)", async () => {
-    const d = tmp();
-    expect(await new FileVectorStore(join(d, "nao.bin"), join(d, "nao.json")).carregar()).toBeNull();
-  });
-
-  it("binário truncado devolve null em vez de vetor cortado", async () => {
-    const d = tmp();
-    const bin = join(d, "v.bin");
-    const meta = join(d, "v.json");
-    await new FileVectorStore(bin, meta).salvar(partes);
-    writeFileSync(bin, readFileSync(bin).subarray(0, 8));
-    expect(await new FileVectorStore(bin, meta).carregar()).toBeNull();
-  });
-
-  it("relê quando o arquivo muda e reaproveita enquanto não muda", async () => {
-    const d = tmp();
-    const bin = join(d, "v.bin");
-    const meta = join(d, "v.json");
-    const store = new FileVectorStore(bin, meta);
-    await store.salvar(partes);
-
-    const primeiro = await store.carregar();
-    expect(await store.carregar()).toBe(primeiro);
-
-    await store.salvar({ ...partes, ids: ["p9"], matriz: Float32Array.from([0, 0, 1]) });
-    const segundo = await store.carregar();
-    expect(segundo).not.toBe(primeiro);
-    expect(segundo!.ids).toEqual(["p9"]);
-  });
-
-  it("o mock nunca escreve no arquivo do catálogo real", () => {
-    expect(arquivosVetoresPadrao("produto", "mock").bin).not.toBe(arquivosVetoresPadrao("produto", "http").bin);
-    expect(arquivosVetoresPadrao("produto", "mock").bin).toContain("-mock");
-    expect(arquivosVetoresPadrao("tipo", "http").bin).not.toContain("-mock");
   });
 });
 
@@ -230,25 +153,8 @@ describe("tipos do produto", () => {
   });
 });
 
-describe("FileTipoStore", () => {
-  it("grava e lê a tabela", async () => {
-    const d = tmp();
-    const store = new FileTipoStore(join(d, "tipos.json"));
-    expect((await store.carregar()).produtos).toEqual({});
-
-    await store.salvar({ versao: 1, produtos: { a: { tipo: "caneca", atualizado_em: "2026-11-01" } } });
-    const lido = await new FileTipoStore(join(d, "tipos.json")).carregar();
-    expect(lido.produtos.a.tipo).toBe("caneca");
-  });
-
-  it("arquivo ilegível vira tabela vazia", async () => {
-    const d = tmp();
-    const file = join(d, "tipos.json");
-    writeFileSync(file, "nao é json", "utf-8");
-    expect((await new FileTipoStore(file).carregar()).produtos).toEqual({});
-  });
-
-  it("MemoryTipoStore guarda o que salvou", async () => {
+describe("MemoryTipoStore", () => {
+  it("guarda o que salvou", async () => {
     const store = new MemoryTipoStore();
     expect(await store.carregar()).toEqual(tabelaTiposVazia());
     await store.salvar({ versao: 1, produtos: { z: { tipo: "mochila", atualizado_em: "" } } });
