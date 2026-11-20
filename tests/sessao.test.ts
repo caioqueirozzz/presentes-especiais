@@ -11,6 +11,7 @@ const controle = vi.hoisted(() => ({
   envioRetorna: { id: "enviada" } as unknown,
   proprioLidErrado: false,
   envios: [] as unknown[][],
+  midias: [] as unknown[][],
   /** false simula o CDP caído: o destroy() da biblioteca volta sem fechar o Chrome (#29). */
   destroyFechaNavegador: true,
   inicializacaoFalha: false,
@@ -89,7 +90,13 @@ vi.mock("whatsapp-web.js", async () => {
       };
     }
   }
-  return { default: { Client: ClienteFalso, LocalAuth: class {} } };
+  return {
+    default: {
+      Client: ClienteFalso,
+      LocalAuth: class {},
+      MessageMedia: { fromUrl: async (...args: unknown[]) => (controle.midias.push(args), { midia: args[0] }) },
+    },
+  };
 });
 
 import { CanalWwebjs } from "../src/whatsapp/sessao.js";
@@ -131,6 +138,7 @@ describe("CanalWwebjs (biblioteca falsa)", () => {
     controle.envioRetorna = { id: "enviada" };
     controle.proprioLidErrado = false;
     controle.envios = [];
+    controle.midias = [];
     controle.destroyFechaNavegador = true;
     controle.inicializacaoFalha = false;
     controle.chromesVivosAoLancar = [];
@@ -156,6 +164,13 @@ describe("CanalWwebjs (biblioteca falsa)", () => {
     antigo.emit("message_create", msg("eco-velho", { fromMe: true, from: "5583900000000@c.us", to: `${TEL}@c.us` }));
     await vi.advanceTimersByTimeAsync(0);
     expect(recebidas).toEqual([]);
+  });
+
+  it("foto: fromUrl com unsafeMime e sendMessage com caption, sem marcar como lida", async () => {
+    const canal = await montar();
+    await canal.enviarImagem(`${TEL}@c.us`, "https://cdn.brinde.me/x.webp", "*Caneca*");
+    expect(controle.midias).toEqual([["https://cdn.brinde.me/x.webp", { unsafeMime: true }]]);
+    expect(controle.envios.at(-1)).toEqual([`${TEL}@c.us`, { midia: "https://cdn.brinde.me/x.webp" }, { caption: "*Caneca*", sendSeen: false }]);
   });
 
   it("envio que a biblioteca devolve vazio (conversa não encontrada) vira erro", async () => {

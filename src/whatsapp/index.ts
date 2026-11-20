@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { config } from "../config.js";
+import { exigirAmbiente } from "../operacao/exigirAmbiente.js";
 import { criarClienteHttp } from "./agenteHttp.js";
 import { iniciarControle } from "./controle.js";
 import { ObservadorCrm } from "./crm.js";
@@ -10,6 +11,7 @@ import { Ponte } from "./ponte.js";
 import { CanalWwebjs } from "./sessao.js";
 
 async function main(): Promise<void> {
+  exigirAmbiente("ponte");
   const w = config.whatsapp;
   const log = criarLogPonte();
   const crmLigado = Boolean(config.crm.url && config.crm.segredo.length >= 16);

@@ -1,0 +1,10 @@
+{
+  "id": "40_total_por_quantidade",
+  "descricao": "Pergunta o total para 100 un.: responde com o total da cotação (R$ 1.540), sem pedir dados nem chamar preparar_orcamento",
+  "mensagens": ["Quero 50 canecas personalizadas", "quanto fica o total para 100 unidades?"],
+  "expectativas": [
+    { "tipo": "nao_chamou_ferramenta", "ferramenta": "preparar_orcamento" },
+    { "tipo": "resposta_contem", "padrao": "R\\$\\s*1\\.?540" },
+    { "tipo": "max_transferencias", "max": 0 }
+  ]
+}

@@ -17,10 +17,15 @@ import { tokenizar } from "../busca/texto.js";
 import { sinonimosDe } from "../busca/sinonimos.js";
 import type { BrindeMeClient } from "../integrations/brindeme/client.js";
 import { translateApiError, ApiError, type FalhaApi } from "../integrations/brindeme/errors.js";
-import type { ProductIndexStore, ProdutoIndexado } from "./indice.js";
+import type { FaixaPreco, ProductIndexStore, ProdutoIndexado } from "./indice.js";
 import { construirRegistro } from "./indice.js";
+import { cotarAoVivo, cotou, MAX_CORES_COTADAS, type ResultadoCotacao } from "./cotacao.js";
+import { proximoDegrau } from "./faixasDeVenda.js";
+import { logarPrecoDivergente } from "./logPrecos.js";
+import { arredondar } from "../integrations/brindeme/mappers.js";
 import {
   calcularOferta,
+  tetoUnitarioCentavos,
   type MotivoInelegivel,
   type Orcamento,
   type OfertaOk,
@@ -70,33 +75,39 @@ export interface ItemRecomendado {
   ocasiaoConfere: boolean;
   /** Relevância 0..1 usada na ordenação. */
   relevancia: number;
+  /** Cotação exata do site das primeiras cores de `oferta.cores` (até 6), na mesma ordem. Vazio sem quantidade. */
+  cotacoes: ResultadoCotacao[];
 }
 
-export type Ajuste =
+export type Ajuste = (
   | {
       tipo: "aumentar_quantidade";
       produto_id: string;
       nome: string;
       quantidade: number;
-      preco_unitario: number;
-      total_estimado: number;
+      preco_unitario?: number;
+      total_estimado?: number;
     }
   | {
       tipo: "reduzir_quantidade";
       produto_id: string;
       nome: string;
       quantidade: number;
-      preco_unitario: number;
-      total_estimado: number;
+      preco_unitario?: number;
+      total_estimado?: number;
     }
   | {
       tipo: "aumentar_orcamento";
       produto_id: string;
       nome: string;
       quantidade: number;
-      preco_unitario_minimo: number;
-      total_estimado: number;
-    };
+      preco_unitario_minimo?: number;
+      total_estimado?: number;
+    }
+) & {
+  /** Cor que o preço cota (a mais barata pelo índice): sem ela o modelo falaria o valor de uma cor como se fosse de todas. */
+  cor?: string;
+};
 
 export type Recomendacao =
   | {
@@ -335,11 +346,39 @@ export async function recomendar(
         descartados++;
         continue;
       }
+      let cotacoes: ResultadoCotacao[] = [];
+      let cores = oferta.cores;
+      if (pedido.quantidade !== undefined) {
+        const q = pedido.quantidade;
+        const cotadas = oferta.cores.slice(0, MAX_CORES_COTADAS);
+        cotacoes = await cotarAoVivo(
+          deps.client,
+          cotadas.map((c) => ({
+            subprodutoId: c.subproduto_id,
+            quantidade: q,
+            proximoDegrau: proximoDegrau(r.fresco.subproducts.find((s) => s.id === c.subproduto_id)?.prices ?? [], q),
+          })),
+          agora
+        );
+        corrigirIndice(r.c.produto, cotacoes, q);
+        // O orçamento é conferido de novo com o preço exato; sem preço conhecido não dá para conferir, e o produto fica.
+        const teto = tetoUnitarioCentavos(orcamento, q);
+        const acima = (x: ResultadoCotacao) => cotou(x) && x.centavos > 0 && x.centavos > teto;
+        const comPreco = cotacoes.filter((x) => cotou(x) && x.centavos > 0);
+        if (comPreco.length > 0 && comPreco.every(acima)) {
+          descartados++;
+          continue;
+        }
+        const manter = cotacoes.map((x) => !acima(x));
+        cores = [...cotadas.filter((_, i) => manter[i]), ...oferta.cores.slice(MAX_CORES_COTADAS)];
+        cotacoes = cotacoes.filter((_, i) => manter[i]);
+      }
       itens.push({
         produto: registro,
-        oferta,
+        oferta: { ...oferta, cores },
         ocasiaoConfere: r.c.ocasiaoConfere,
         relevancia: relevancia(r.c),
+        cotacoes,
       });
     }
   }
@@ -368,7 +407,7 @@ export async function recomendar(
     motivo: "regras_nao_fecham",
     candidatosRelevantes: candidatos.length,
     eliminadosPor,
-    ajustes: propor(reprovados.slice(0, MAX_PARA_EXPLICAR), pedido, orcamento),
+    ajustes: await precificarAjustes(propor(reprovados.slice(0, MAX_PARA_EXPLICAR), pedido, orcamento), deps.client, agora),
     ocasioes: consulta.ocasioes,
     descartadosNaRevalidacao: descartados,
   };
@@ -383,9 +422,9 @@ function propor(
   reprovados: Array<{ c: Candidato; relevancia: number; motivo: MotivoInelegivel }>,
   pedido: PedidoRecomendacao,
   orcamento: Orcamento
-): Ajuste[] {
-  const ajustes: Ajuste[] = [];
-  const jaTem = (tipo: Ajuste["tipo"]) => ajustes.some((a) => a.tipo === tipo);
+): Array<{ ajuste: Ajuste; subprodutoId: string; cor: string }> {
+  const ajustes: Array<{ ajuste: Ajuste; subprodutoId: string; cor: string }> = [];
+  const jaTem = (tipo: Ajuste["tipo"]) => ajustes.some((a) => a.ajuste.tipo === tipo);
 
   for (const { c, motivo } of reprovados) {
     if (ajustes.length >= 2) break;
@@ -398,12 +437,16 @@ function propor(
       const o = calcularOferta(p, q, orcamento);
       if (o.ok) {
         ajustes.push({
-          tipo: "aumentar_quantidade",
-          produto_id: p.id,
-          nome: p.nome,
-          quantidade: q,
-          preco_unitario: o.preco_unitario,
-          total_estimado: o.total_estimado,
+          ajuste: {
+            tipo: "aumentar_quantidade",
+            produto_id: p.id,
+            nome: p.nome,
+            quantidade: q,
+            preco_unitario: o.preco_unitario,
+            total_estimado: o.total_estimado,
+          },
+          subprodutoId: o.cores[0].subproduto_id,
+            cor: o.cores[0].cor,
         });
       }
     } else if (motivo === "estoque_insuficiente" && !jaTem("reduzir_quantidade")) {
@@ -412,12 +455,16 @@ function propor(
         const o = calcularOferta(p, q, orcamento);
         if (o.ok) {
           ajustes.push({
-            tipo: "reduzir_quantidade",
-            produto_id: p.id,
-            nome: p.nome,
-            quantidade: q,
-            preco_unitario: o.preco_unitario,
-            total_estimado: o.total_estimado,
+            ajuste: {
+              tipo: "reduzir_quantidade",
+              produto_id: p.id,
+              nome: p.nome,
+              quantidade: q,
+              preco_unitario: o.preco_unitario,
+              total_estimado: o.total_estimado,
+            },
+            subprodutoId: o.cores[0].subproduto_id,
+            cor: o.cores[0].cor,
           });
         }
       }
@@ -428,16 +475,66 @@ function propor(
         const o = calcularOferta(p, base.quantidade, {});
         if (o.ok) {
           ajustes.push({
-            tipo: "aumentar_orcamento",
-            produto_id: p.id,
-            nome: p.nome,
-            quantidade: base.quantidade,
-            preco_unitario_minimo: preco,
-            total_estimado: o.total_estimado,
+            ajuste: {
+              tipo: "aumentar_orcamento",
+              produto_id: p.id,
+              nome: p.nome,
+              quantidade: base.quantidade,
+              preco_unitario_minimo: preco,
+              total_estimado: o.total_estimado,
+            },
+            subprodutoId: o.cores[0].subproduto_id,
+            cor: o.cores[0].cor,
           });
         }
       }
     }
   }
   return ajustes;
+}
+
+/** O preço do ajuste vem do site, da cor mais barata pelo índice; sem preço exato, o ajuste sai sem valor. */
+async function precificarAjustes(
+  lista: Array<{ ajuste: Ajuste; subprodutoId: string; cor: string }>,
+  client: BrindeMeClient,
+  agora: () => Date
+): Promise<Ajuste[]> {
+  if (lista.length === 0) return [];
+  const cotacoes = await cotarAoVivo(client, lista.map(({ ajuste, subprodutoId }) => ({ subprodutoId, quantidade: ajuste.quantidade })), agora);
+  return lista.map(({ ajuste, cor }, i) => {
+    const c = cotacoes[i];
+    const exato = cotou(c) && c.centavos > 0 ? c.centavos : null;
+    const preco = exato === null ? undefined : exato / 100;
+    const total = exato === null ? undefined : arredondar((exato * ajuste.quantidade) / 100);
+    return ajuste.tipo === "aumentar_orcamento"
+      ? { ...ajuste, preco_unitario_minimo: preco, total_estimado: total, cor: cor || undefined }
+      : { ...ajuste, preco_unitario: preco, total_estimado: total, cor: cor || undefined };
+  });
+}
+
+/**
+ * Autocorreção (spec 6.7): a cotação exata vale e o grupo é corrigido no índice EM MEMÓRIA. Gravar o arquivo
+ * daqui disputaria com o sync:precos, que roda em outro processo.
+ */
+function corrigirIndice(produto: ProdutoIndexado, cotacoes: ResultadoCotacao[], quantidade: number): void {
+  for (const c of cotacoes) {
+    if (!cotou(c)) continue;
+    const sub = produto.subprodutos.find((s) => s.id === c.subproduto_id);
+    if (!sub) continue;
+    const faixa = sub.faixas.find((f) => quantidade >= f.min && quantidade <= f.max);
+    const indice = faixa ? Math.round(faixa.preco * 100) : null;
+    if ((indice ?? 0) === c.centavos) continue;
+    logarPrecoDivergente({ produto_id: produto.id, grupo_preco: sub.grupo_preco ?? "", subproduto_id: sub.id, quantidade, indice, site: c.centavos });
+    for (const s of produto.subprodutos) {
+      if (s === sub || (sub.grupo_preco && s.grupo_preco === sub.grupo_preco)) s.faixas = corrigirFaixa(s.faixas, quantidade, c.centavos);
+    }
+  }
+}
+
+// shortcut: a faixa inteira fica com o preço de um ponto; o sync:precos noturno regrava o certo.
+function corrigirFaixa(faixas: FaixaPreco[], quantidade: number, centavos: number): FaixaPreco[] {
+  const atual = faixas.find((f) => quantidade >= f.min && quantidade <= f.max);
+  const resto = faixas.filter((f) => f !== atual);
+  if (centavos === 0) return resto;
+  return [...resto, { min: atual?.min ?? quantidade, max: atual?.max ?? quantidade, preco: centavos / 100 }].sort((a, b) => a.min - b.min);
 }

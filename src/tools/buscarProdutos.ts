@@ -5,6 +5,9 @@ import { FileProductIndexStore, type ProductIndexStore } from "../catalogo/indic
 import { FileOccasionTagStore, rotuloDaOcasiao, type OccasionTagStore } from "../catalogo/ocasioes.js";
 import { recomendar, type Ajuste, type Recomendacao } from "../catalogo/recomendar.js";
 import type { MotivoInelegivel } from "../catalogo/oferta.js";
+import { cotou, guardarCotacoes, type Cotacao } from "../catalogo/cotacao.js";
+import { montarCartao } from "./cartao.js";
+import { arredondar } from "../integrations/brindeme/mappers.js";
 
 export const buscarProdutosSchema = z.object({
   consulta: z
@@ -42,7 +45,7 @@ function getTags(): OccasionTagStore {
 }
 
 export const OBSERVACAO_PRECOS =
-  "Preço de tabela por quantidade. Personalização, frete e condições especiais são confirmados no orçamento.";
+  "Preço do site por quantidade. Personalização, frete e condições especiais são confirmados no orçamento.";
 
 const ROTULO_MOTIVO: Record<MotivoInelegivel, string> = {
   abaixo_do_minimo: "com pedido mínimo acima da quantidade pedida",
@@ -52,11 +55,19 @@ const ROTULO_MOTIVO: Record<MotivoInelegivel, string> = {
   acima_do_orcamento: "acima do valor informado",
 };
 
+const INSTRUCAO_CARTOES =
+  'Os cartões (foto, nome, cores, preço e condição para mais unidades) já vão ao cliente antes da sua mensagem. Não copie nem redigite o cartão (nome, cores, preço por unidade, condição, foto). total_se_o_cliente_perguntar: não cite; diga só se ele perguntar o total. Se o cliente pediu orçamento e já deu produto, cor, quantidade e os dados (PF ou PJ, nome e e-mail), chame preparar_orcamento agora com o subproduto_id dessa cor; faltando dado, peça, nunca invente. Senão, apresente em uma frase e pergunte qual agrada ou qual cor. Cartão com "Valor a confirmar com a equipe": se o cliente quiser fechar esse produto, transfira com transferir_humano.';
+
 function explicar(eliminadosPor: Partial<Record<MotivoInelegivel, number>>): string {
   const partes = (Object.keys(ROTULO_MOTIVO) as MotivoInelegivel[])
     .filter((m) => (eliminadosPor[m] ?? 0) > 0)
     .map((m) => `${eliminadosPor[m]} ${ROTULO_MOTIVO[m]}`);
   return partes.length ? partes.join("; ") : "Nenhum produto atende aos critérios.";
+}
+
+function soEstoque(eliminadosPor: Partial<Record<MotivoInelegivel, number>>): boolean {
+  const motivos = Object.keys(eliminadosPor);
+  return motivos.length > 0 && motivos.every((m) => m === "sem_estoque" || m === "estoque_insuficiente");
 }
 
 function guardarNecessidade(state: ConversationState, input: BuscarProdutosInput): void {
@@ -101,8 +112,9 @@ function formatar(r: Recomendacao, input: BuscarProdutosInput, state: Conversati
         razao: explicar(r.eliminadosPor),
         candidatos_relevantes: r.candidatosRelevantes,
         ajustes_sugeridos: r.ajustes,
-        instrucao_ao_agente:
-          "Explique ao cliente, em uma frase, o que não fechou (quantidade, estoque ou valor). Se houver ajustes_sugeridos, ofereça o mais próximo e, se ele aceitar, chame buscar_produtos de novo com os novos números. Não cite produto que não esteja em ajustes_sugeridos.",
+        instrucao_ao_agente: soEstoque(r.eliminadosPor)
+          ? "Diga que não tem no estoque para essa quantidade. Ofereça o ajuste de ajustes_sugeridos, se houver, e o atendimento humano para confirmar a disponibilidade (transferir_humano com motivo outro se ele aceitar). Não cite produto que não esteja em ajustes_sugeridos."
+          : "Explique ao cliente, em uma frase, o que não fechou (quantidade, estoque ou valor). Se houver ajustes_sugeridos, ofereça o mais próximo e, se ele aceitar, chame buscar_produtos de novo com os novos números. Não cite produto que não esteja em ajustes_sugeridos.",
       };
     }
 
@@ -118,6 +130,17 @@ function formatar(r: Recomendacao, input: BuscarProdutosInput, state: Conversati
         cores: oferta.cores.map((c) => ({ subproduto_id: c.subproduto_id, cor: c.cor })),
       }));
       const informada = r.quantidadeInformada;
+      guardarCotacoes(state, r.itens.flatMap((i) => i.cotacoes));
+      const cartoes = r.itens.map(({ produto: p, oferta, cotacoes }) =>
+        montarCartao({
+          produto_id: p.id,
+          nome: p.nome,
+          imagem_url: p.imagem_url,
+          quantidade: informada ? oferta.quantidade : undefined,
+          cotadas: oferta.cores.slice(0, cotacoes.length).map((c, i) => ({ cor: c.cor, cotacao: cotacoes[i] })),
+          outras: oferta.cores.slice(cotacoes.length).map((c) => c.cor),
+        })
+      );
       return {
         resultado: "produtos_encontrados",
         total: r.itens.length,
@@ -133,24 +156,33 @@ function formatar(r: Recomendacao, input: BuscarProdutosInput, state: Conversati
               aviso:
                 "O cliente não informou a quantidade, e o preço muda por faixa: não passe valor nenhum. Apresente as opções e pergunte a quantidade; depois chame buscar_produtos de novo com ela.",
             }),
-        produtos: r.itens.map(({ produto: p, oferta, ocasiaoConfere }) => ({
-          id: p.id,
-          nome: p.nome,
-          sku: p.sku,
-          imagem_url: p.imagem_url,
-          min_quantity: p.quantidade_minima,
-          ...(informada
-            ? {
-                preco_unitario_na_quantidade: oferta.preco_unitario,
-                total_estimado: oferta.total_estimado,
-              }
-            : {}),
-          // Produto sem variação de cor vem com color "" da API.
-          cores_disponiveis: oferta.cores.map((c) => c.cor).filter(Boolean),
-          // O id da cor vai junto: sem ele, o modelo mandava o id do produto ao preparar_orcamento.
-          subprodutos: oferta.cores.map((c) => (c.cor ? { subproduto_id: c.subproduto_id, cor: c.cor } : { subproduto_id: c.subproduto_id })),
-          ...(r.ocasioes.length ? { indicado_para_a_ocasiao: ocasiaoConfere } : {}),
-        })),
+        produtos: r.itens.map(({ produto: p, oferta, ocasiaoConfere, cotacoes }) => {
+          const exatos = cotacoes.filter((c): c is Cotacao => cotou(c) && c.centavos > 0).map((c) => c.centavos);
+          const menor = exatos.length ? Math.min(...exatos) : null;
+          // Cores cotadas com preços diferentes: o total é o da mais barata, e o modelo precisa dizer qual é.
+          const corDoTotal = exatos.some((e) => e !== menor)
+            ? oferta.cores.find((_, i) => { const c = cotacoes[i]; return cotou(c) && c.centavos === menor; })?.cor
+            : undefined;
+          return {
+            id: p.id,
+            nome: p.nome,
+            min_quantity: p.quantidade_minima,
+            ...(informada
+              ? {
+                  preco_unitario_na_quantidade: menor === null ? null : menor / 100,
+                  total_estimado: menor === null ? null : arredondar((menor * oferta.quantidade) / 100),
+                  ...(corDoTotal ? { cor_do_total: corDoTotal } : {}),
+                }
+              : {}),
+            // Produto sem variação de cor vem com color "" da API.
+            cores_disponiveis: oferta.cores.map((c) => c.cor).filter(Boolean),
+            // O id da cor vai junto: sem ele, o modelo mandava o id do produto ao preparar_orcamento.
+            subprodutos: oferta.cores.map((c) => (c.cor ? { subproduto_id: c.subproduto_id, cor: c.cor } : { subproduto_id: c.subproduto_id })),
+            ...(r.ocasioes.length ? { indicado_para_a_ocasiao: ocasiaoConfere } : {}),
+          };
+        }),
+        cartoes,
+        instrucao_ao_agente: INSTRUCAO_CARTOES,
       };
     }
   }

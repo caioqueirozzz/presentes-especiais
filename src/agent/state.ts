@@ -1,3 +1,4 @@
+import type { Cotacao } from "../catalogo/cotacao.js";
 import { createHash } from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { markdownParaWhatsApp } from "../contrato/texto.js";
@@ -110,6 +111,8 @@ export interface ConversationState {
   /** Arquivos que chegaram pelo WhatsApp (gravados pela ponte). Ausente em estados salvos antes da Fase 4. */
   arquivosRecebidos?: ArquivoRecebido[];
   fichaPedido?: FichaPedido;
+  /** Preços exatos do site já consultados nesta conversa (chave `subproduto_id:quantidade`), válidos por 1 h. */
+  cotacoes?: Record<string, Cotacao>;
   /**
    * A estimativa que o cliente confirmou e foi para a equipe emitir. fichaPedido some na transferência;
    * isto fica: é o registro de que a triagem terminou (o CRM qualifica o lead como quente por ele).

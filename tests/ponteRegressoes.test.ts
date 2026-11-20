@@ -1,3 +1,4 @@
+import type { ItemResposta } from "../src/contrato/esquemas.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
@@ -228,7 +229,7 @@ describe("Ponte — regressões da revisão e da validação", () => {
     agente.enviarLote = async (p) => {
       agente.lotes.push(p);
       const resposta = await eco.processarLote(p);
-      return { tipo: "ok", resposta: { ...resposta, respostas: resposta.respostas.flatMap((r) => r.split("\n")) } };
+      return { tipo: "ok", resposta: { ...resposta, respostas: resposta.respostas.flatMap((r): ItemResposta[] => (typeof r === "string" ? r.split("\n") : [r])) } };
     };
     canal.falhar.set("parte2", 2);
     const antiga = canal.mensagem({ chatId: CHAT, texto: "parte1\nparte2" });

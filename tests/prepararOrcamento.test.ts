@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { Cotacao } from "../src/catalogo/cotacao.js";
+import { setSobDemanda } from "../src/catalogo/sobDemanda.js";
 import { MockBrindeMeClient } from "../src/integrations/brindeme/mockClient.js";
 import { AVISO_ESTIMATIVA, prepararOrcamentoHandler } from "../src/tools/prepararOrcamento.js";
 import { transferirHumanoHandler } from "../src/tools/transferirHumano.js";
@@ -245,5 +247,71 @@ describe("transferir_humano com orcamento_para_emitir (R5: o agente estima, pess
   it("outro motivo não exige ficha", async () => {
     const r = await transferirHumanoHandler({ motivo: "desconto", prioridade: "normal" }, state, client);
     expect(r.status).toBe("transferido");
+  });
+});
+
+describe("preparar_orcamento com o preço exato do site", () => {
+  const entrada = (quantidade = 50) => ({ tipo: "PF" as const, nome: "João Silva", email: "joao@teste.com", itens: [{ subproduto_id: "sub-001-branco", quantidade }] });
+  const comMapa = () => {
+    const state = createInitialState("5583999990000");
+    state.subprodutoParaProduto["sub-001-branco"] = "prod-001";
+    return state;
+  };
+  afterEach(() => setSobDemanda(null));
+
+  it("reaproveita a cotação válida da conversa sem chamar o site de novo", async () => {
+    const client = new MockBrindeMeClient();
+    const espiao = vi.spyOn(client, "precoVenda");
+    const state = comMapa();
+    state.cotacoes = { "sub-001-branco:50": { subproduto_id: "sub-001-branco", quantidade: 50, centavos: 2000, fonte: "site", em: new Date().toISOString() } };
+    const r = (await prepararOrcamentoHandler(entrada(), state, client)) as { resumo: { itens: Array<{ preco_unitario: number; subtotal: number }> } };
+    expect(espiao).not.toHaveBeenCalled();
+    expect(r.resumo.itens[0]).toMatchObject({ preco_unitario: 20, subtotal: 1000 });
+  });
+
+  it("cota de novo com mais de 1 h, com outra quantidade ou com fonte que não é site", async () => {
+    const client = new MockBrindeMeClient();
+    const espiao = vi.spyOn(client, "precoVenda");
+    const velha = new Date(Date.now() - 2 * 3_600_000).toISOString();
+    const casos: Array<Record<string, Cotacao>> = [
+      { "sub-001-branco:50": { subproduto_id: "sub-001-branco", quantidade: 50, centavos: 1, fonte: "site" as const, em: velha } },
+      { "sub-001-branco:60": { subproduto_id: "sub-001-branco", quantidade: 60, centavos: 1, fonte: "site" as const, em: new Date().toISOString() } },
+      { "sub-001-branco:50": { subproduto_id: "sub-001-branco", quantidade: 50, centavos: 1, fonte: "indice" as "site", em: new Date().toISOString() } },
+    ];
+    for (const cotacoes of casos) {
+      const state = comMapa();
+      state.cotacoes = cotacoes;
+      const r = (await prepararOrcamentoHandler(entrada(), state, client)) as { resumo: { itens: Array<{ preco_unitario: number }> } };
+      expect(r.resumo.itens[0].preco_unitario).toBe(18.9);
+    }
+    expect(espiao).toHaveBeenCalledTimes(3);
+  });
+
+  it("sem preço (rota fora ou 'a consultar'): preco_indisponivel com a instrução de transferir", async () => {
+    const fora = new MockBrindeMeClient();
+    fora.falharPrecoVenda = true;
+    const r1 = await prepararOrcamentoHandler(entrada(), comMapa(), fora);
+    expect(r1).toMatchObject({ erro: "preco_indisponivel", instrucao: "transferir", motivo_sugerido: "outro" });
+
+    const semLimite = new (class extends MockBrindeMeClient {
+      async getProduct(id: string) {
+        const p = await super.getProduct(id);
+        return { ...p, subproducts: p.subproducts.map((s) => ({ ...s, stock: 100_000 })) };
+      }
+    })();
+    const r2 = await prepararOrcamentoHandler(entrada(10_000), comMapa(), semLimite);
+    expect(r2).toMatchObject({ erro: "preco_indisponivel" });
+  });
+
+  it("sob demanda passa sem estoque; sem estoque em nenhuma cor oferece o humano", async () => {
+    const client = new MockBrindeMeClient();
+    const state = createInitialState("5583999990000");
+    state.subprodutoParaProduto["sub-006-cristal"] = "prod-006";
+    const item = { tipo: "PF" as const, nome: "João Silva", email: "joao@teste.com", itens: [{ subproduto_id: "sub-006-cristal", quantidade: 1500 }] };
+    const sem = (await prepararOrcamentoHandler(item, state, client)) as { erro: string; instrucao: string };
+    expect(sem.erro).toBe("estoque_insuficiente");
+    expect(sem.instrucao).toMatch(/não tem no estoque/);
+    setSobDemanda(["prod-006"]);
+    expect(await prepararOrcamentoHandler(item, state, client)).toMatchObject({ status: "estimativa_pronta" });
   });
 });

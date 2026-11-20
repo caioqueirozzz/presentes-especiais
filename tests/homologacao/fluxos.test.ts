@@ -30,14 +30,15 @@ describe("H1 — fluxos completos", () => {
     b.llm.roteiro(
       toolUse("buscar_produtos", { consulta: "caneca", quantidade: 50, ocasiao: "natal" }),
       (c) => {
-        const busca = resultados(c)[0] as { resultado: string; produtos: Array<{ id: string; preco_unitario_na_quantidade: number }> };
+        const busca = resultados(c)[0] as { resultado: string; produtos: Array<{ id: string }> };
         expect(busca.resultado).toBe("produtos_encontrados");
-        const caneca = busca.produtos.find((p) => p.id === "prod-001")!;
-        return endTurn(`A Caneca de Porcelana sai por R$ ${caneca.preco_unitario_na_quantidade} cada em 50 unidades.`);
+        // O preço vai no cartão: o modelo não o recebe, para não redigitá-lo.
+        expect(busca.produtos.find((p) => p.id === "prod-001")).not.toHaveProperty("preco_unitario_na_quantidade");
+        return endTurn("Qual cor te agrada?");
       }
     );
     const r2 = await b.enviar("quero 50 canecas para o natal da empresa");
-    expect(r2.respostas.join(" ")).toContain("18.9");
+    expect(JSON.stringify(r2.respostas)).toMatch(/R\$\s18,90\/un/);
 
     b.llm.roteiro(
       toolUse("detalhar_produto", { produto_id: "prod-001", quantidade: 50 }),

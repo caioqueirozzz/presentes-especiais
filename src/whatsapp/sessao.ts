@@ -14,7 +14,7 @@ import {
 } from "./saude.js";
 import { ehConversaDireta, normalizarTelefone } from "./telefone.js";
 
-const { Client, LocalAuth } = wwebjs;
+const { Client, LocalAuth, MessageMedia } = wwebjs;
 type ClienteWhatsApp = InstanceType<typeof Client>;
 // Os tipos de qrcode-terminal não têm export default; o require devolve o module.exports do CJS.
 const qrcode = createRequire(import.meta.url)("qrcode-terminal") as typeof import("qrcode-terminal");
@@ -150,6 +150,13 @@ export class CanalWwebjs implements CanalWhatsApp {
     // Sem sendSeen: false a biblioteca marca a conversa como lida a cada envio; e-mail no texto virava prévia de site.
     const enviada = await this.exigirCliente().sendMessage(chatId, texto, { sendSeen: false, linkPreview: false });
     // A biblioteca resolve vazio, sem lançar, quando não acha a conversa.
+    if (!enviada) throw new Error(`WhatsApp não encontrou a conversa ${chatId}`);
+  }
+
+  async enviarImagem(chatId: string, url: string, legenda: string): Promise<void> {
+    // Sonda de 05/11: assim o webp do CDN chega como foto, com a legenda inteira.
+    const midia = await MessageMedia.fromUrl(url, { unsafeMime: true });
+    const enviada = await this.exigirCliente().sendMessage(chatId, midia, { caption: legenda, sendSeen: false });
     if (!enviada) throw new Error(`WhatsApp não encontrou a conversa ${chatId}`);
   }
 

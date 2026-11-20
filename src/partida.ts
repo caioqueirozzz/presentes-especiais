@@ -1,5 +1,6 @@
 import type { BrindeMeClient } from "./integrations/brindeme/client.js";
 import { FileProductIndexStore } from "./catalogo/indice.js";
+import { sobDemandaAusentes } from "./catalogo/sobDemanda.js";
 import { garantirIndice } from "./catalogo/garantirIndice.js";
 import { carregarBase } from "./knowledge/base.js";
 import { config } from "./config.js";
@@ -34,6 +35,12 @@ export async function avisarConhecimentoECatalogo(client: BrindeMeClient): Promi
       console.log(`${GRAY}Índice de catálogo montado a partir dos mocks: ${s.produtos} produto(s)${RESET}`);
     } else {
       console.log(`${GRAY}Índice de catálogo: ${s.produtos} produto(s), sincronizado há ${s.idadeHoras < 1 ? "menos de 1" : Math.round(s.idadeHoras)}h${RESET}`);
+    }
+    if (config.brindeMe.mode === "http") {
+      const noIndice = new Set(new FileProductIndexStore().carregar().produtos.map((p) => p.id));
+      for (const p of sobDemandaAusentes(noIndice)) {
+        console.log(`${YELLOW}! sob demanda: "${p.nome}" (${p.id}) não está no índice do catálogo${RESET}`);
+      }
     }
   } catch (err) {
     console.log(`${YELLOW}! não foi possível preparar o índice de catálogo: ${err instanceof Error ? err.message : err}${RESET}`);

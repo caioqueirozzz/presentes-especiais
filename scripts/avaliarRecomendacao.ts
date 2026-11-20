@@ -45,6 +45,8 @@ interface PedidoJson {
 }
 
 const real = (n: number): string => `R$ ${n.toFixed(2).replace(".", ",")}`;
+/** Ajuste sem cotação exata do site sai sem valor. */
+const valor = (n?: number): string => (n === undefined ? "valor a confirmar" : real(n));
 
 function argumento(nome: string): string | undefined {
   const i = process.argv.indexOf(`--${nome}`);
@@ -131,8 +133,8 @@ async function main() {
       semResposta++;
       const ajustes = r.ajustes.map((a) =>
         a.tipo === "aumentar_orcamento"
-          ? `subir o valor para ${real(a.preco_unitario_minimo)}/un (${a.nome}, ${a.quantidade} un = ${real(a.total_estimado)})`
-          : `${a.tipo === "aumentar_quantidade" ? "subir" : "reduzir"} para ${a.quantidade} un (${a.nome}, ${real(a.preco_unitario)}/un = ${real(a.total_estimado)})`
+          ? `subir o valor para ${valor(a.preco_unitario_minimo)}/un (${a.nome}, ${a.quantidade} un = ${valor(a.total_estimado)})`
+          : `${a.tipo === "aumentar_quantidade" ? "subir" : "reduzir"} para ${a.quantidade} un (${a.nome}, ${valor(a.preco_unitario)}/un = ${valor(a.total_estimado)})`
       );
       console.log(`${YELLOW}–${RESET} ${p.id} ${p.pedido}\n  ${GRAY}sem sugestão (${r.motivo})${ajustes.length ? ` · ajustes: ${ajustes.join("; ")}` : ""}${RESET}`);
       planilha.push(

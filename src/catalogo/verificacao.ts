@@ -7,6 +7,7 @@
  * dois está errado — e é isso que o teste e o script de avaliação detectam.
  */
 import type { Product } from "../integrations/brindeme/types.js";
+import { ehSobDemanda } from "./sobDemanda.js";
 
 export interface SugestaoParaVerificar {
   quantidade: number;
@@ -52,7 +53,7 @@ export function verificarSugestao(
       v.push({ regra: "estoque", detalhe: `subproduto ${cor.subproduto_id} inexistente ou inativo` });
       continue;
     }
-    if (sub.stock < s.quantidade) {
+    if (!ehSobDemanda(produto.id) && sub.stock < s.quantidade) {
       v.push({ regra: "estoque", detalhe: `${sub.color}: estoque ${sub.stock} < ${s.quantidade}` });
     }
     const faixa = sub.prices.find((f) => s.quantidade >= f.min && s.quantidade <= f.max);

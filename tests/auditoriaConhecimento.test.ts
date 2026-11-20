@@ -142,6 +142,6 @@ describe("prompt de sistema", () => {
     expect(sys).toContain("sem_resposta_na_base");
     expect(sys).toMatch(/instrucao: "transferir"/);
     expect(sys).toContain("Como recomendar produtos");
-    expect(sys).toMatch(/no máximo 3 opções/);
+    expect(sys).toMatch(/Os cartões já vão ao cliente/);
   });
 });
