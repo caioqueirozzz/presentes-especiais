@@ -18,6 +18,7 @@
     "sync:pedidos": "tsx scripts/syncPedidos.ts",
     "test:orcamento": "tsx scripts/testCriarOrcamento.ts",
     "sync:catalogo": "tsx scripts/syncCatalogo.ts",
+    "gerar:vetores": "tsx scripts/gerarVetores.ts",
     "sync:precos": "tsx scripts/syncPrecos.ts",
     "conferir:precos": "tsx scripts/conferirPrecos.ts",
     "sondar:ritmo-precos": "tsx scripts/sondarRitmoPrecos.ts",
