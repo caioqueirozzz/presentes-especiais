@@ -171,6 +171,7 @@ npm run relatorio:piloto -- --desde 2026-10-20 --saida docs/fase-6/piloto-semana
 | `agente.estado_sistema` (banco) | Suspensão e ferramentas desligadas |
 
 - **Nunca** versionar `.env` nem `data/` (já estão no `.gitignore`).
+- **Banco novo:** `agente.modo_lia` vazio com `WHATSAPP_LIBERADOS` vazio deixa a Lia **ligada para todos** na primeira partida, e `agente.estado_ponte` vazio põe toda conversa de volta na IA (quem estava com atendente perde o modo humano). Antes de ligar a ponte num banco novo, grave o modo da Lia pelo CRM (teste ou desligada) e confira as conversas que estavam com atendente.
 - Retenção (issue #4): `npm run limpar:dados -- --dias <prazo>` lista o que passou do prazo: conversas, lacunas, conversas corrompidas e registros da ponte (no banco), mais artes e logs (em disco). Com `--executar`, apaga **de vez**. Rode com o agente e a ponte parados. **O prazo é decisão da loja**: registre aqui quando for decidido: `RETENCAO_DIAS = ____ (decidido por ____ em __/__/____)`.
 - O cliente pediu para apagar os dados dele? Pare o agente e a ponte, rode `npm run limpar:dados -- --telefone <telefone>` para conferir o que sai e repita com `--executar`. Sai tudo dele: conversa (inclusive a corrompida), artes, logs, lacunas e o estado na ponte.
 
