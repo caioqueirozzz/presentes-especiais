@@ -39,8 +39,8 @@ export interface OpcoesPrecoVenda {
   agora?: () => number;
 }
 
-/** 404 é id que não existe: a rota respondeu, não caiu. */
-const contaComoFalha = (err: unknown): boolean => !(err instanceof ErroPrecoVenda && err.status === 404);
+/** 404 (id inativo) e 429 (ritmo, já tratado pelo Retry-After): a rota respondeu, não caiu. */
+const contaComoFalha = (err: unknown): boolean => !(err instanceof ErroPrecoVenda && (err.status === 404 || err.status === 429));
 
 /** `{"prices":{"10":4241}}`: toda quantidade pedida precisa vir com um inteiro ≥ 0. */
 export function lerPrecos(texto: string, quantidades: number[]): Map<number, number> | null {

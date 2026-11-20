@@ -26,6 +26,8 @@ const SEMPRE = new Set(["afc89ae2-d187-405a-b826-d2e2ae0447f5", "dd4c5dbf-ab7d-4
 const TELEFONE_FICTICIO = "5500000000000";
 
 type Detalhe = {
+  erro?: { erro?: string };
+  resultado?: string;
   subprodutos_ativos?: Array<{ subproduto_id: string; cor: string; preco_para_quantidade: number | null; atende_quantidade: boolean | null }>;
 };
 
@@ -46,8 +48,10 @@ async function main(): Promise<void> {
     console.error("Índice vazio ou v1: rode npm run sync:precos -- --migrar.");
     process.exit(1);
   }
-  const client = createBrindeMeClient({ reqPorMinuto: config.catalogo.reqPorMinuto });
-  const custoCru = new HttpBrindeMeClient({ reqPorMinuto: config.catalogo.reqPorMinuto });
+  // Dois clientes na mesma API oficial: dividem o ritmo, senão somam o dobro e vem 429 (limite_excedido).
+  const ritmo = Math.max(1, Math.floor(config.catalogo.reqPorMinuto / 2));
+  const client = createBrindeMeClient({ reqPorMinuto: ritmo });
+  const custoCru = new HttpBrindeMeClient({ reqPorMinuto: ritmo });
   const vitrine = new PrecoVendaHttp();
   const pausa = numero("pausa-ms", 500);
 
@@ -60,14 +64,17 @@ async function main(): Promise<void> {
 
   for (const [n, p] of amostra.entries()) {
     if (n > 0) await new Promise((r) => setTimeout(r, pausa));
+    if (n % 10 === 0) console.log(`  ${n}/${amostra.length} produtos (${conferidos} conferido(s), ${puladas.length} pulada(s))`);
     const base = p.subprodutos[Math.floor(aleatorio() * p.subprodutos.length)];
     if (!base) continue;
     const minimo = Math.max(1, p.quantidade_minima);
-    const quantidades = quantidadesDeTeste(base.limites ?? [], minimo, aleatorio);
+    const teto = Math.max(0, ...p.subprodutos.map((s) => s.estoque));
+    // Sem estoque para o mínimo: o agente não cota nenhuma cor, não há preço a conferir.
+    const quantidades = teto < minimo ? [] : quantidadesDeTeste(base.limites ?? [], minimo, aleatorio, 3, teto);
     for (const [i, q] of quantidades.entries()) {
       const det = (await detalharProdutoHandler({ produto_id: p.id, quantidade: q }, createInitialState(TELEFONE_FICTICIO), client)) as Detalhe;
       if (!det.subprodutos_ativos) {
-        puladas.push(`detalhar ${p.nome} ${q} un.: devolveu erro`);
+        puladas.push(`detalhar ${p.nome} ${q} un.: devolveu erro (${det.erro?.erro ?? det.resultado ?? "sem detalhe"})`);
         continue;
       }
       // O detalhar só cota as primeiras cores que atendem: fora delas o preço é null e não é divergência.

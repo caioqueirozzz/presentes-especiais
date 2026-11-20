@@ -45,7 +45,7 @@ function getTags(): OccasionTagStore {
 }
 
 export const OBSERVACAO_PRECOS =
-  "Preço do site por quantidade. Personalização, frete e condições especiais são confirmados no orçamento.";
+  "Preço do site por quantidade.";
 
 const ROTULO_MOTIVO: Record<MotivoInelegivel, string> = {
   abaixo_do_minimo: "com pedido mínimo acima da quantidade pedida",

@@ -46,10 +46,11 @@ export async function prepararOrcamentoHandler(
     // Cache por produto: vários itens podem vir do mesmo produto.
     const cache = new Map<string, Awaited<ReturnType<typeof client.getProduct>>>();
 
-    for (const item of input.itens) {
+    for (const pedido of input.itens) {
+      const item = { ...pedido };
       // A listagem não traz subprodutos, então não dá para varrer o catálogo:
       // o produto de origem vem do mapa preenchido por buscar/detalhar.
-      const produtoId = state.subprodutoParaProduto[item.subproduto_id];
+      let produtoId = state.subprodutoParaProduto[item.subproduto_id];
       // buscar_produtos só mostra o id do produto; o modelo às vezes manda esse no lugar da cor.
       if (!produtoId && state.produtosDiscutidos.includes(item.subproduto_id)) {
         const produto = await client.getProduct(item.subproduto_id);
@@ -60,15 +61,23 @@ export async function prepararOrcamentoHandler(
           nome: produto.name,
           cores: produto.subproducts.filter((s) => s.status).map((s) => ({ subproduto_id: s.id, cor: s.color })),
         });
-        return {
-          erro: "informe_a_cor",
-          produto: produto.name,
-          opcoes: produto.subproducts
-            .filter((s) => s.status && (ehSobDemanda(produto.id) || s.stock > 0))
-            .map((s) => ({ subproduto_id: s.id, cor: s.color, estoque: s.stock })),
-          instrucao:
-            "Esse id é do produto, não da cor. Use o subproduto_id da cor que o cliente pediu; se ele aceitou qualquer cor, use uma com estoque que cubra a quantidade; se ele não disse, pergunte. Depois chame preparar_orcamento de novo.",
-        };
+        const opcoes = produto.subproducts
+          .filter((s) => s.status && (ehSobDemanda(produto.id) || s.stock > 0))
+          .map((s) => ({ subproduto_id: s.id, cor: s.color, estoque: s.stock }));
+        const cobrem = opcoes.filter((o) => ehSobDemanda(produto.id) || o.estoque >= item.quantidade);
+        // Uma cor só, ou só uma cobre a quantidade: não há o que perguntar (loop de "confirma a cor?" no dogfooding de 09/11).
+        const unica = opcoes.length === 1 ? opcoes[0] : cobrem.length === 1 ? cobrem[0] : undefined;
+        if (!unica) {
+          return {
+            erro: "informe_a_cor",
+            produto: produto.name,
+            opcoes,
+            instrucao:
+              "Esse id é do produto, não da cor. Use o subproduto_id da cor que o cliente pediu; se ele aceitou qualquer cor, use uma com estoque que cubra a quantidade; se ele não disse, pergunte. Depois chame preparar_orcamento de novo.",
+          };
+        }
+        item.subproduto_id = unica.subproduto_id;
+        produtoId = produto.id;
       }
       if (!produtoId) {
         return {

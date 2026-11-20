@@ -1,7 +1,7 @@
 import { ConversaDesconhecidaError, TurnoEmAndamentoError, type Agente } from "../contrato/agente.js";
 import type { Evento, PedidoMensagens, RespostaEvento, RespostaMensagens } from "../contrato/esquemas.js";
-import { itensDosCartoes } from "../tools/cartao.js";
-import { formatarParaWhatsApp, loteParaTexto } from "../contrato/texto.js";
+import { respostasDoTurno } from "../tools/cartao.js";
+import { loteParaTexto } from "../contrato/texto.js";
 import { addMessage, createInitialState, type ConversationState } from "../agent/state.js";
 import { runTurn } from "../agent/runTurn.js";
 import type { LLMProvider } from "../llm/types.js";
@@ -46,7 +46,7 @@ export class AgenteDireto implements Agente {
       );
       for (const m of novas) this.idsVistos.add(m.id);
       const resposta: RespostaMensagens = {
-        respostas: [...itensDosCartoes(resultado.cartoes ?? []), ...formatarParaWhatsApp(resultado.response ?? "")],
+        respostas: respostasDoTurno(resultado.cartoes ?? [], resultado.response ?? ""),
         modo: estado.modo,
         ...(resultado.transferred
           ? {

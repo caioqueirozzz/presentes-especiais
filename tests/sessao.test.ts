@@ -15,6 +15,9 @@ const controle = vi.hoisted(() => ({
   /** false simula o CDP caído: o destroy() da biblioteca volta sem fechar o Chrome (#29). */
   destroyFechaNavegador: true,
   inicializacaoFalha: false,
+  inicializacaoFalhaNaPartida: false,
+  /** true: o initialize() fica pendurado (página que não abre) e só rejeita quando o cliente é destruído. */
+  inicializacaoPendura: false,
   chromesVivosAoLancar: [] as number[],
 }));
 
@@ -50,13 +53,19 @@ vi.mock("whatsapp-web.js", async () => {
       controle.chromesVivosAoLancar.push(vivos.length);
       controle.clientes.push(this);
     }
+    rejeitarAbertura?: (err: Error) => void;
     async initialize() {
+      if (controle.inicializacaoPendura) {
+        return new Promise<void>((_, rejeitar) => (this.rejeitarAbertura = rejeitar));
+      }
+      if (controle.inicializacaoFalhaNaPartida && controle.clientes.length === 1) throw new Error("TimeoutError: Waiting failed: 30000ms exceeded");
       if (controle.inicializacaoFalha && controle.clientes.length > 1) {
         throw new Error("The browser is already running for nunca-usado");
       }
     }
     async destroy() {
       this.destruido = true;
+      this.rejeitarAbertura?.(new Error("Navigating frame was detached"));
       if (controle.destroyFechaNavegador) this.processo.exitCode = 0;
     }
     async logout() {}
@@ -141,6 +150,8 @@ describe("CanalWwebjs (biblioteca falsa)", () => {
     controle.midias = [];
     controle.destroyFechaNavegador = true;
     controle.inicializacaoFalha = false;
+    controle.inicializacaoFalhaNaPartida = false;
+    controle.inicializacaoPendura = false;
     controle.chromesVivosAoLancar = [];
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -207,6 +218,30 @@ describe("CanalWwebjs (biblioteca falsa)", () => {
     await vi.advanceTimersByTimeAsync(119_000);
     expect(controle.clientes).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(2_000);
+    expect(controle.clientes).toHaveLength(2);
+  });
+
+  it("abertura pendurada: a reconexão não derruba a partida e relança de novo se a nova também pendurar", async () => {
+    controle.inicializacaoPendura = true;
+    const eventos: Record<string, unknown>[] = [];
+    const canal = new CanalWwebjs({ sessaoDir: "nunca-usado", log: (e) => eventos.push(e) });
+    const partida = canal.iniciar();
+    await vi.advanceTimersByTimeAsync(121_000);
+    await expect(partida).resolves.toBeUndefined();
+    expect(controle.clientes).toHaveLength(2);
+    expect(eventos.some((e) => e.type === "abertura_substituida")).toBe(true);
+    await vi.advanceTimersByTimeAsync(121_000);
+    expect(controle.clientes).toHaveLength(3);
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it("abertura que falha na partida não derruba a ponte: o vigia relança", async () => {
+    controle.inicializacaoFalhaNaPartida = true;
+    const eventos: Record<string, unknown>[] = [];
+    const canal = new CanalWwebjs({ sessaoDir: "nunca-usado", log: (e) => eventos.push(e) });
+    await expect(canal.iniciar()).resolves.toBeUndefined();
+    expect(eventos.some((e) => e.type === "abertura_falhou")).toBe(true);
+    await vi.advanceTimersByTimeAsync(121_000);
     expect(controle.clientes).toHaveLength(2);
   });
 

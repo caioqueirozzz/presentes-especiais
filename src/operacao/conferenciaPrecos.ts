@@ -23,9 +23,10 @@ export function sortear<T>(lista: T[], n: number, aleatorio: () => number, sempr
   return [...fixos, ...resto].slice(0, Math.max(n, fixos.length));
 }
 
-export function quantidadesDeTeste(limites: Limite[], minimo: number, aleatorio: () => number, quantas = 3): number[] {
+/** teto = maior estoque do produto: acima dele nenhuma cor atende, e o agente não cota. */
+export function quantidadesDeTeste(limites: Limite[], minimo: number, aleatorio: () => number, quantas = 3, teto = 5000): number[] {
   const candidatas = [...new Set([...limites.flatMap((l) => [l.min, l.max]), ...DEGRAUS_DO_SITE])].filter(
-    (q) => q > minimo && q <= 5000
+    (q) => q > minimo && q <= Math.min(teto, 5000)
   );
   return [minimo, ...sortear(candidatas, quantas - 1, aleatorio)];
 }

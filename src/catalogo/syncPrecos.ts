@@ -3,6 +3,7 @@
  * dos limites guardados. Não chama a API oficial. Mais de 5% de grupos com falha: não grava nada.
  */
 import type { ConsultaPreco } from "../integrations/brindeme/clienteComPrecoDeVenda.js";
+import { ErroPrecoVenda } from "../integrations/brindeme/precoVenda.js";
 import { chaveDoGrupo, idsDeGrupo, limitesDe, montarFaixasDeVenda, pontosDeConsulta } from "./faixasDeVenda.js";
 import {
   VERSAO_INDICE,
@@ -30,6 +31,8 @@ export interface FalhaSyncPrecos {
 export interface ResultadoSyncPrecos {
   grupos: number;
   atualizados: number;
+  /** Grupos com todas as cores inativas no site (404): ficam sem faixa, "Valor a confirmar". */
+  semPreco: number;
   falhas: FalhaSyncPrecos[];
   gravou: boolean;
 }
@@ -52,24 +55,35 @@ export async function recalcularPrecos(
   indice: IndiceCatalogo,
   consultar: ConsultaPreco,
   opcoes: OpcoesSyncPrecos = {}
-): Promise<{ indice: IndiceCatalogo; grupos: number; atualizados: number; falhas: FalhaSyncPrecos[] }> {
+): Promise<{ indice: IndiceCatalogo; grupos: number; atualizados: number; semPreco: number; falhas: FalhaSyncPrecos[] }> {
   const agora = (opcoes.agora ?? new Date()).toISOString();
   const produtos = structuredClone(indice.produtos);
   const grupos = gruposDe(produtos);
   const falhas: FalhaSyncPrecos[] = [];
   let atualizados = 0;
+  let semPreco = 0;
   let proximo = 0;
   let feitos = 0;
+  /** Cores do grupo têm o mesmo preço: cor inativa no site (404) passa para a próxima. Todas 404: null (sem preço). */
+  async function precosDoGrupo(subs: SubprodutoIndexado[], quantidades: number[]): Promise<Map<number, number> | null> {
+    for (const s of subs) {
+      try {
+        return await consultar(s.id, quantidades);
+      } catch (err) {
+        if (!(err instanceof ErroPrecoVenda && err.status === 404)) throw err;
+      }
+    }
+    return null;
+  }
   async function trabalhador(): Promise<void> {
     while (proximo < grupos.length) {
       const g = grupos[proximo++];
       const limites = g.subs[0].limites ?? [];
       const minimo = g.produto.quantidade_minima;
       try {
-        const faixas: FaixaPreco[] =
-          limites.length === 0
-            ? []
-            : montarFaixasDeVenda(limites, minimo, await consultar(g.subs[0].id, pontosDeConsulta(limites, minimo))).map((f) => ({ min: f.min, max: f.max, preco: f.price }));
+        const precos = limites.length === 0 ? null : await precosDoGrupo(g.subs, pontosDeConsulta(limites, minimo));
+        if (limites.length > 0 && !precos) semPreco++;
+        const faixas: FaixaPreco[] = precos ? montarFaixasDeVenda(limites, minimo, precos).map((f) => ({ min: f.min, max: f.max, preco: f.price })) : [];
         for (const s of g.subs) {
           s.faixas = faixas;
           s.faixas_venda_em = agora;
@@ -81,8 +95,8 @@ export async function recalcularPrecos(
       opcoes.onProgresso?.(++feitos, grupos.length);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(Math.max(1, opcoes.concorrencia ?? 3), grupos.length) }, trabalhador));
-  return { indice: { ...indice, versao: VERSAO_INDICE, produtos }, grupos: grupos.length, atualizados, falhas };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, opcoes.concorrencia ?? 1), grupos.length) }, trabalhador));
+  return { indice: { ...indice, versao: VERSAO_INDICE, produtos }, grupos: grupos.length, atualizados, semPreco, falhas };
 }
 
 /** Aplica as faixas novas sobre o índice ATUAL: produto que entrou ou saiu durante o sync continua como está. */
@@ -105,7 +119,7 @@ export async function sincronizarPrecos(store: ProductIndexStore, consultar: Con
   const r = await recalcularPrecos(store.carregar(), consultar, opcoes);
   const gravou = r.grupos > 0 && r.falhas.length / r.grupos <= FRACAO_MAXIMA_DE_FALHAS;
   if (gravou) store.salvar(aplicar(store.carregar(), r.indice));
-  return { grupos: r.grupos, atualizados: r.atualizados, falhas: r.falhas, gravou };
+  return { grupos: r.grupos, atualizados: r.atualizados, semPreco: r.semPreco, falhas: r.falhas, gravou };
 }
 
 interface IndiceV1 {

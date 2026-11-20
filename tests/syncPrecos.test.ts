@@ -49,6 +49,37 @@ describe("sync de preços", () => {
     expect(ps[8].subprodutos[0].faixas).toEqual([{ min: 10, max: 99, preco: 25 }]);
   });
 
+  it("cor inativa (404) passa para a próxima do grupo; todas 404 ficam sem preço, sem contar como falha", async () => {
+    const doisGrupos = (): IndiceCatalogo => ({
+      versao: VERSAO_INDICE,
+      sincronizado_em: T0.toISOString(),
+      completo: true,
+      produtos: [
+        construirRegistro(
+          produto({ id: "pa", nome: "A", min: 10, subprodutos: [
+            { ...sub("preto", "Preto", 0, [[10, 99, 10]]), grupo_preco: "g1" },
+            { ...sub("azul", "Azul", 5, [[10, 99, 10]]), grupo_preco: "g1" },
+          ] }),
+          T0
+        ),
+        construirRegistro(produto({ id: "pb", nome: "B", min: 10, subprodutos: [{ ...sub("fume", "Fume", 0, [[10, 99, 10]]), grupo_preco: "g1" }] }), T0),
+      ],
+    });
+    const chamadas: string[] = [];
+    const consultar = async (id: string, qs: number[]) => {
+      chamadas.push(id);
+      if (id !== "azul") throw new ErroPrecoVenda("formato", "HTTP 404", { status: 404 });
+      return new Map(qs.map((q) => [q, 2500]));
+    };
+    const store = new MemoryProductIndexStore(doisGrupos());
+    const r = await sincronizarPrecos(store, consultar, { agora: T1 });
+    expect(r).toMatchObject({ grupos: 2, atualizados: 2, semPreco: 1, falhas: [], gravou: true });
+    expect(chamadas).toEqual(["preto", "azul", "fume"]);
+    const [a, b] = store.carregar().produtos;
+    expect(a.subprodutos.map((s) => s.faixas[0]?.preco)).toEqual([25, 25]);
+    expect(b.subprodutos[0].faixas).toEqual([]);
+  });
+
   it("acima de 5% de falha: não grava nada", async () => {
     const antes = indice(20);
     const store = new MemoryProductIndexStore(antes);

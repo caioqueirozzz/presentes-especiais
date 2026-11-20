@@ -6,7 +6,7 @@ import { AgenteDefinitivo } from "../src/api/agenteDefinitivo.js";
 import { RepositorioConversas } from "../src/conversas/repositorio.js";
 import { pedido } from "./helpers/bateriaContrato.js";
 import { runTurn } from "../src/agent/runTurn.js";
-import { createInitialState } from "../src/agent/state.js";
+import { addMessage, createInitialState } from "../src/agent/state.js";
 import { MockBrindeMeClient } from "../src/integrations/brindeme/mockClient.js";
 import { Logger } from "../src/logging/logger.js";
 import { itensDosCartoes } from "../src/tools/cartao.js";
@@ -26,13 +26,57 @@ describe("cartões no turno", () => {
     const state = createInitialState("5583999990000");
     const llm = new ScriptedLLM([toolUse("buscar_produtos", { consulta: "caneca", quantidade: 50 }), endTurn("Qual delas te agrada?")]);
     const r = await runTurn("quero 50 canecas", state, llm, new MockBrindeMeClient(), new Logger(state.conversaId));
-    expect(r.response).toBe("Qual delas te agrada?");
+    expect(r.response).toMatch(/^Olá! Sou a Lia, da Presentes Especiais 😊 Separei est/);
     expect(r.cartoes?.length).toBeGreaterThan(0);
     expect(r.cartoes![0].legenda).toMatch(/^\*Caneca de Porcelana Personalizada\*/);
     const ultima = state.historico.at(-1)!;
     expect(ultima.role).toBe("assistant");
-    expect(ultima.content.startsWith(r.cartoes![0].legenda)).toBe(true);
-    expect(ultima.content.endsWith("Qual delas te agrada?")).toBe(true);
+    expect(ultima.content.startsWith(r.response!)).toBe(true);
+    expect(ultima.content.endsWith(r.cartoes!.at(-1)!.legenda)).toBe(true);
+  });
+
+  it("com cartão, o texto do modelo vira a frase fixa; fora do primeiro contato, sem saudação (dogfooding de 09/11)", async () => {
+    await usarIndiceDoMock();
+    const state = createInitialState("5583999990000");
+    addMessage(state, "assistant", "Olá! Sou a Lia.");
+    const llm = new ScriptedLLM([
+      toolUse("buscar_produtos", { consulta: "caneca", quantidade: 50 }),
+      endTurn(`Encontrei esta:
+
+- **Caneca**
+- **Preço:** a confirmar com a equipe
+
+Qual cor?`),
+    ]);
+    const r = await runTurn("quero 50 canecas", state, llm, new MockBrindeMeClient(), new Logger(state.conversaId));
+    expect(r.response).toMatch(/^Separei est.+ para você\. (Te|Qual te) agrada\?$/);
+    expect(state.historico.at(-1)!.content).not.toContain("a confirmar");
+  });
+
+  it("no turno do detalhar o texto do modelo fica (avisos de estoque e mínimo), só filtrado", async () => {
+    await usarIndiceDoMock();
+    const state = createInitialState("5583999990000");
+    const llm = new ScriptedLLM([
+      toolUse("detalhar_produto", { produto_id: "prod-003", quantidade: 100 }),
+      endTurn("Não tem no estoque para 100 un. Quer que eu chame a equipe?\n- **Preço:** a confirmar"),
+    ]);
+    const r = await runTurn("quero 100", state, llm, new MockBrindeMeClient(), new Logger(state.conversaId));
+    expect(r.cartoes?.length).toBeGreaterThan(0);
+    expect(r.response).toBe("Não tem no estoque para 100 un. Quer que eu chame a equipe?");
+  });
+
+  it("no turno do orçamento o resumo passa sem filtro", async () => {
+    await usarIndiceDoMock();
+    const state = createInitialState("5583999990000");
+    const resumo = `• 50× Caneca — R$ 10,00 cada = R$ 500,00
+Total estimado: R$ 500,00`;
+    const llm = new ScriptedLLM([
+      toolUse("buscar_produtos", { consulta: "caneca", quantidade: 50 }),
+      toolUse("preparar_orcamento", { tipo: "PF", nome: "Ana", email: "ana@x.com", itens: [{ subproduto_id: "sub-001-branco", quantidade: 50 }] }),
+      endTurn(resumo),
+    ]);
+    const r = await runTurn("50 canecas brancas, PF, Ana, ana@x.com", state, llm, new MockBrindeMeClient(), new Logger(state.conversaId));
+    expect(r.response).toBe(resumo);
   });
 
   it("o modelo não recebe a legenda nem a foto dos cartões: só sabe que foram enviados (eval 35)", async () => {
@@ -99,16 +143,16 @@ describe("cartões no turno", () => {
     expect(respostaMensagensSchema.parse({ respostas: [...itens, "texto"], modo: "ia" }).respostas).toHaveLength(4);
   });
 
-  it("AgenteDefinitivo: turno normal com buscar_produtos devolve o cartão antes do texto", async () => {
+  it("AgenteDefinitivo: turno normal com buscar_produtos devolve o texto num balão só, antes dos cartões", async () => {
     await usarIndiceDoMock();
     const repo = new RepositorioConversas(mkdtempSync(join(tmpdir(), "conversas-")));
     const llm = new ScriptedLLM([toolUse("buscar_produtos", { consulta: "caneca", quantidade: 50 }), endTurn("Qual delas te agrada?")]);
     const agente = new AgenteDefinitivo({ repo, llm, client: new MockBrindeMeClient(), tetoMs: 90_000, respostasPorHora: 30 });
     const r = await agente.processarLote(pedido("5583999990000", ["r1"]));
     expect(r.modo).toBe("ia");
-    expect(r.respostas.at(-1)).toBe("Qual delas te agrada?");
-    const primeiro = r.respostas[0];
-    const legenda = typeof primeiro === "string" ? primeiro : primeiro.legenda;
+    expect(r.respostas[0]).toMatch(/Separei est/);
+    const segundo = r.respostas[1];
+    const legenda = typeof segundo === "string" ? segundo : segundo.legenda;
     expect(legenda).toMatch(/^\*Caneca de Porcelana Personalizada\*/);
   });
 });

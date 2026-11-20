@@ -4,3 +4,5 @@ dist/
 logs/
 *.log
 data/
+.superpowers
+.wwebjs_cache/
