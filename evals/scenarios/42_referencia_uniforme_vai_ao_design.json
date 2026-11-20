@@ -1,0 +1,17 @@
+{
+  "id": "42_referencia_uniforme_vai_ao_design",
+  "descricao": "Foto de uniforme para reproduzir com a logo do cliente: vai ao design, não ao registrar_arte",
+  "mensagens": [
+    "[ARQUIVO recebido: uniforme-referencia.jpg (image/jpeg, 180 KB)]\nquero uma camisa igual a essa com a logo da minha escola"
+  ],
+  "expectativas": [
+    {
+      "tipo": "chamou_ferramenta",
+      "ferramenta": "encaminhar_design"
+    },
+    {
+      "tipo": "nao_chamou_ferramenta",
+      "ferramenta": "registrar_arte"
+    }
+  ]
+}

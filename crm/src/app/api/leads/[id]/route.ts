@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getLeadForUser, isAdmin, jsonError, readJson, requireUser, serverError } from "@/lib/access";
 import { query, transaction } from "@/lib/db";
+import { gatilhoArte, jobAbertoDoLead } from "@/lib/design";
 import { logEvent } from "@/lib/leads";
 import { STAGE_LABELS } from "@/lib/types";
 import type { LeadEvent, Message, Stage } from "@/lib/types";
@@ -9,7 +10,7 @@ type Context = { params: Promise<{ id: string }> };
 const STAGES = Object.keys(STAGE_LABELS) as Stage[];
 
 export async function GET(_request: Request, { params }: Context) {
-  const guard = await requireUser();
+  const guard = await requireUser({ allowDesigner: true });
   if (guard.error) return guard.error;
   const { id } = await params;
   try {
@@ -31,7 +32,7 @@ export async function GET(_request: Request, { params }: Context) {
     if (lead.unread_count > 0 && (lead.assigned_to === guard.user.id || (!lead.assigned_to && isAdmin(guard.user)))) {
       await query("UPDATE leads SET unread_count = 0 WHERE id = $1", [id]);
     }
-    return NextResponse.json({ lead, messages, events });
+    return NextResponse.json({ lead, messages, events, design_job: await jobAbertoDoLead(id) });
   } catch (err) {
     return serverError(err, "abrir lead");
   }
@@ -158,6 +159,7 @@ export async function PATCH(request: Request, { params }: Context) {
       await tx.query(`UPDATE leads SET ${sets.join(", ")} WHERE id = $1`, values);
       for (const e of events) await logEvent(tx, id, user.id, e.type, e.data);
     });
+    if (body.stage === "ARTE" && lead.stage !== "ARTE") await gatilhoArte({ leadId: id, atorId: user.id });
     return NextResponse.json({ lead: await getLeadForUser(id, user) });
   } catch (err) {
     return serverError(err, "atualizar lead");

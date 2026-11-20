@@ -12,7 +12,7 @@ const STAGES = ["NOVO", "ATENDIMENTO", "ORCAMENTO", "ARTE", "NEGOCIACAO", "GANHO
  * owner (admin: "me" | "none" | id), attention, waiting.
  */
 export async function GET(request: Request) {
-  const guard = await requireUser();
+  const guard = await requireUser({ allowDesigner: true });
   if (guard.error) return guard.error;
   const user = guard.user;
   const url = new URL(request.url);

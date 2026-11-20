@@ -6,7 +6,7 @@ import { PgConversas } from "../conversas/armazem.js";
 import { lerEstadoSistema, ligarEstadoSistema } from "../controle/estadoSistema.js";
 import { abrirBanco, logarErroBanco } from "../db/banco.js";
 import { criarClienteHttp } from "./agenteHttp.js";
-import { iniciarControle } from "./controle.js";
+import { arquivosDaConversa, iniciarControle } from "./controle.js";
 import { ObservadorCrm } from "./crm.js";
 import { PgEstadoPonte } from "./estadoPonte.js";
 import { criarLogPonte } from "./log.js";
@@ -51,7 +51,16 @@ async function main(): Promise<void> {
   ponte.definirModoLia(modo);
   ponte.iniciar(w.varreduraMs);
   if (crmLigado) {
-    iniciarControle({ porta: config.crm.controlePorta, segredo: config.crm.segredo, canal, ponte, lia, log });
+    const conversas = new PgConversas(banco);
+    iniciarControle({
+      porta: config.crm.controlePorta,
+      segredo: config.crm.segredo,
+      canal,
+      ponte,
+      lia,
+      log,
+      lerArquivos: async (t) => arquivosDaConversa(await conversas.ler(t)),
+    });
     console.log(`Mensagens indo para o CRM em ${config.crm.url}`);
   } else {
     console.log("CRM não configurado (CRM_URL e CRM_INTEGRATION_SECRET no .env): sem painel web, QR só aqui no terminal.");

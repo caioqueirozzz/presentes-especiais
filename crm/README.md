@@ -104,3 +104,4 @@ src/components/       shell (dcimob), home, crm, boards, ia, reports, admin
 - Enviar arquivos/imagens pelo CRM (hoje só texto; arquivos recebidos aparecem como "📎 Arquivo enviado").
 - A ponte guarda a fila para o CRM só em memória: se ela reiniciar com o CRM fora do ar, o que estava na fila se perde (as conversas seguem nos arquivos do agente e entram pelo `sync:agente`).
 - Recuperação de senha por e-mail: o admin redefine pela tela de Equipe.
+- Tabela Pantone do módulo design (`src/lib/designIa/pantone.json`): provisória, 52 cores Pantone C com o HEX sRGB aproximado que a própria Pantone publica para tela. O "~Pantone" da paleta é uma aproximação por ΔE, não substitui a conferência no guia físico.

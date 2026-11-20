@@ -8,7 +8,7 @@ import type { Role } from "@/lib/types";
 
 /** Troca a própria senha (obrigatória no primeiro acesso). Derruba as outras sessões. */
 export async function POST(request: Request) {
-  const guard = await requireUser({ allowPendingPassword: true });
+  const guard = await requireUser({ allowPendingPassword: true, allowDesigner: true });
   if (guard.error) return guard.error;
   const body = await readJson(request);
   const current = typeof body.current === "string" ? body.current : "";

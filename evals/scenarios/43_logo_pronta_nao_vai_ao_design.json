@@ -1,0 +1,17 @@
+{
+  "id": "43_logo_pronta_nao_vai_ao_design",
+  "descricao": "Logo pronta só para gravar em caneca: registra a arte e segue o orçamento, sem designer",
+  "mensagens": [
+    "[ARQUIVO recebido: logo.png (image/png, 40 KB)]\nquero essa logo gravada em 50 canecas"
+  ],
+  "expectativas": [
+    {
+      "tipo": "chamou_ferramenta",
+      "ferramenta": "registrar_arte"
+    },
+    {
+      "tipo": "nao_chamou_ferramenta",
+      "ferramenta": "encaminhar_design"
+    }
+  ]
+}

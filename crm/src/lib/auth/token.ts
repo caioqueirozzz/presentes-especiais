@@ -6,7 +6,8 @@ import { SignJWT, jwtVerify } from "jose";
  * as rotas da API conferem também o usuário no banco (ativo, versão da sessão).
  */
 
-export type Role = "ADMIN" | "COLABORADOR";
+export type { Role } from "@/lib/types";
+import type { Role } from "@/lib/types";
 
 export const SESSION_COOKIE = "pe_session";
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
@@ -48,14 +49,11 @@ export async function verifySession(token: string | undefined): Promise<SessionC
   try {
     const { payload } = await jwtVerify(token, secret(), { algorithms: ["HS256"] });
     if (typeof payload.sub !== "string") return null;
-    if (payload.role !== "ADMIN" && payload.role !== "COLABORADOR") return null;
+    if (payload.role !== "ADMIN" && payload.role !== "COLABORADOR" && payload.role !== "DESIGNER") return null;
     return { sub: payload.sub, role: payload.role, v: Number(payload.v) || 0, pwd: payload.pwd === true };
   } catch {
     return null;
   }
 }
 
-/** Página inicial de cada papel */
-export function homeFor(role: Role): string {
-  return role === "ADMIN" ? "/admin/inicio" : "/app/inicio";
-}
+export { homeFor } from "@/lib/types";

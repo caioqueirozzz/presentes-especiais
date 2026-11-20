@@ -2,7 +2,12 @@
  * Tipos e réguas compartilhados entre servidor e navegador (sem imports de servidor).
  */
 
-export type Role = "ADMIN" | "COLABORADOR";
+export type Role = "ADMIN" | "COLABORADOR" | "DESIGNER";
+
+/** Página inicial de cada papel */
+export function homeFor(role: Role): string {
+  return role === "ADMIN" ? "/admin/inicio" : role === "DESIGNER" ? "/app/design" : "/app/inicio";
+}
 export type QualificationStatus = "NONE" | "IN_PROGRESS" | "QUALIFIED" | "DISQUALIFIED";
 export type Stage = "NOVO" | "ATENDIMENTO" | "ORCAMENTO" | "ARTE" | "NEGOCIACAO" | "GANHO" | "PERDIDO";
 export type LeadTemperature = "quente" | "morno" | "frio";
