@@ -55,9 +55,9 @@ function semFundo(px: RGB[], lado: number): RGB[] {
   return resto.length >= 0.1 * px.length ? resto : px;
 }
 
-/** Cores dominantes por k-means (k=6) numa miniatura 64×64; grupos com menos de 3% saem. */
+/** Cores dominantes por k-means (k=6) numa miniatura 64×64; grupos com menos de 3% saem. Transparência vira branco. */
 export async function calcularPaleta(imagem: Buffer): Promise<CorPaleta[]> {
-  const raw = await sharp(imagem).removeAlpha().resize(64, 64, { fit: "fill", kernel: "nearest" }).raw().toBuffer();
+  const raw = await sharp(imagem).flatten({ background: "#ffffff" }).resize(64, 64, { fit: "fill", kernel: "nearest" }).raw().toBuffer();
   const todos: RGB[] = [];
   for (let i = 0; i < raw.length; i += 3) todos.push([raw[i], raw[i + 1], raw[i + 2]]);
   const px = semFundo(todos, 64);

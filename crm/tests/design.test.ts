@@ -77,12 +77,30 @@ describe("abrirOuAnexar", () => {
     const j = (await job(r.jobId))!;
     expect([j.stage, j.ia_status]).toEqual(["NA_FILA", "SEM_IMAGEM"]);
   });
-  it("arquivo com tipo inválido é recusado inteiro", async () => {
+  it("arquivo com tipo inválido é pulado e registrado; os bons seguem", async () => {
     const lead = await criarLead();
-    await expect(
-      abrirOuAnexar({ leadId: lead, origem: "VENDEDOR", imagens: [{ bytes: Buffer.from("MZ"), nome: "x.png" }] })
-    ).rejects.toBeInstanceOf(DesignError);
-    expect((await query("SELECT 1 FROM design_jobs")).length).toBe(0);
+    const r = await abrirOuAnexar({ leadId: lead, origem: "VENDEDOR", imagens: [{ bytes: Buffer.from("MZ"), nome: "x.png" }, PNG] });
+    expect(r.ignorados).toEqual(["x.png"]);
+    expect((await query("SELECT 1 FROM design_assets WHERE job_id = $1 AND tipo = 'ORIGINAL'", [r.jobId])).length).toBe(1);
+    expect((await query("SELECT 1 FROM design_events WHERE job_id = $1 AND tipo = 'arquivo_ignorado'", [r.jobId])).length).toBe(1);
+  });
+  it("mesma imagem reenviada não vira outro original nem volta para a análise", async () => {
+    const lead = await criarLead();
+    const { jobId } = await abrirOuAnexar({ leadId: lead, origem: "LIA", imagens: [PNG] });
+    await query("UPDATE design_jobs SET stage = 'NA_FILA' WHERE id = $1", [jobId]);
+    await abrirOuAnexar({ leadId: lead, origem: "LIA", imagens: [{ ...PNG, nome: "outro-nome.png" }] });
+    expect((await job(jobId))!.stage).toBe("NA_FILA");
+    expect((await query("SELECT 1 FROM design_assets WHERE job_id = $1 AND tipo = 'ORIGINAL'", [jobId])).length).toBe(1);
+  });
+  it("mesma imagem em EM_CRIACAO não avisa o designer", async () => {
+    const d = await criarUsuario({ role: "DESIGNER" });
+    const lead = await criarLead();
+    const { jobId } = await abrirOuAnexar({ leadId: lead, origem: "VENDEDOR", imagens: [PNG] });
+    await query("UPDATE design_jobs SET stage = 'NA_FILA', designer_id = $2 WHERE id = $1", [jobId, d]);
+    await mudarEtapa(jobId, "EM_CRIACAO", d);
+    await query("DELETE FROM notifications");
+    await abrirOuAnexar({ leadId: lead, origem: "LIA", imagens: [PNG] });
+    expect((await query("SELECT 1 FROM notifications WHERE user_id = $1", [d])).length).toBe(0);
   });
   it("imagem nova em job não assumido volta para PROCESSANDO_IA e zera tentativas", async () => {
     const lead = await criarLead();
@@ -133,7 +151,10 @@ describe("rodízio do designer", () => {
       const { jobId } = await abrirOuAnexar({ leadId: lead, origem: "VENDEDOR", imagens: [] });
       ids.push((await job(jobId))!.designer_id);
     }
-    expect(ids).toEqual([d1, d2, d1]);
+    // O rodízio segue created_at e, no empate (mesmo milissegundo), o id
+    const ordem = (await query<{ id: string }>("SELECT id FROM users WHERE role = 'DESIGNER' ORDER BY created_at, id")).map((u) => u.id);
+    expect(new Set([d1, d2])).toEqual(new Set(ordem));
+    expect(ids).toEqual([ordem[0], ordem[1], ordem[0]]);
   });
   it("sem designer ativo, notifica os admins e o job fica sem designer", async () => {
     const admin = await criarUsuario({ role: "ADMIN" });

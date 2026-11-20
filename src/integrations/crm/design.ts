@@ -20,6 +20,7 @@ export interface PedidoDesign {
 export type Encaminhar = (p: PedidoDesign) => Promise<{ jobId: string; imagens: number }>;
 
 const PRAZO_MS = 30_000;
+const MAX_ARQUIVOS = 10;
 
 async function noCrm(p: PedidoDesign): Promise<{ jobId: string; imagens: number }> {
   if (!config.crm.url || config.crm.segredo.length < 16) throw new Error("CRM não configurado.");
@@ -35,7 +36,8 @@ async function noCrm(p: PedidoDesign): Promise<{ jobId: string; imagens: number 
     if (valor) form.set(campo, valor);
   }
   let imagens = 0;
-  for (const a of p.arquivos) {
+  // O CRM guarda até 10 por chamada: vão os mais recentes da conversa
+  for (const a of p.arquivos.slice(-MAX_ARQUIVOS)) {
     // Arquivo apagado do disco (limpeza, outra máquina): segue com os outros
     const bytes = await readFile(a.caminho).catch(() => null);
     if (!bytes) continue;

@@ -99,7 +99,7 @@ export function DesignJobView({ id }: { id: string }) {
   const mockups = assets.filter((a) => a.tipo === "MOCKUP").sort((a, b) => b.versao - a.versao);
   const arteFinal = assets.find((a) => a.tipo === "ARTE_FINAL");
   const souDesigner = me.role === "DESIGNER";
-  const acoes = botoesDaEtapa(job.stage, { souDesigner, isAdmin, semDesigner: !job.designer_id });
+  const acoes = botoesDaEtapa(job.stage, { souDesigner, isAdmin, semDesigner: !job.designer_id, conversaComDesigner: job.conversa_com_designer });
   const podeEscrever = acoes.length > 0 && !acoes.includes("assumir");
   const selo = seloIa(job.stage, job.ia_status);
   const etapa = (para: Etapa) => api(`/api/design/${id}/etapa`, { body: { para } });

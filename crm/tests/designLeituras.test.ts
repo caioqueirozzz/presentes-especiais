@@ -41,6 +41,11 @@ describe("listarJobs", () => {
     await query("UPDATE design_jobs SET stage = 'APROVADO', updated_at = NOW() - interval '15 days' WHERE id = $1", [j2]);
     expect((await listarJobs({ id: admin, role: "ADMIN" })).map((j) => j.id)).toEqual([j1]);
   });
+  it("designer vê também os jobs sem dono, para poder assumir", async () => {
+    const { d1, j1, j2 } = await doisDesigners();
+    await query("UPDATE design_jobs SET designer_id = NULL WHERE id = $1", [j2]);
+    expect((await listarJobs({ id: d1, role: "DESIGNER" })).map((j) => j.id).sort()).toEqual([j1, j2].sort());
+  });
   it("o card nunca traz o telefone", async () => {
     const { admin } = await doisDesigners();
     const [card] = await listarJobs({ id: admin, role: "ADMIN" });

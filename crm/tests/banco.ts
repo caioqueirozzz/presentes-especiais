@@ -12,8 +12,9 @@ let seq = 0;
 export async function criarUsuario(p: { role: "ADMIN" | "COLABORADOR" | "DESIGNER"; nome?: string }): Promise<string> {
   seq++;
   const row = await one<{ id: string }>(
-    "INSERT INTO users (name, email, password_hash, role, receives_leads) VALUES ($1, $2, 'x', $3, $4) RETURNING id",
-    [p.nome ?? `Pessoa ${seq}`, `p${seq}-${randomUUID().slice(0, 6)}@teste.local`, p.role, p.role === "COLABORADOR"]
+    // created_at estritamente crescente: o rodízio ordena por ele e dois usuários no mesmo milissegundo empatariam
+    "INSERT INTO users (name, email, password_hash, role, receives_leads, created_at) VALUES ($1, $2, 'x', $3, $4, clock_timestamp() + make_interval(secs => $5::int / 1000.0)) RETURNING id",
+    [p.nome ?? `Pessoa ${seq}`, `p${seq}-${randomUUID().slice(0, 6)}@teste.local`, p.role, p.role === "COLABORADOR", seq]
   );
   return row!.id;
 }

@@ -29,6 +29,9 @@ type Job = {
 };
 const ler = (id: string) => one<Job>("SELECT * FROM design_jobs WHERE id = $1", [id]);
 const eventos = (id: string) => query<{ tipo: string; dados: Record<string, unknown> }>("SELECT tipo, dados FROM design_events WHERE job_id = $1 ORDER BY created_at, id", [id]);
+// Medida pelo relógio do banco: o do Docker pode divergir alguns segundos do relógio do PC
+const esperaNoBanco = async (id: string) =>
+  Number((await one<{ s: string }>("SELECT EXTRACT(EPOCH FROM ia_proxima_tentativa_em - NOW()) AS s FROM design_jobs WHERE id = $1", [id]))!.s);
 const adiantar = (id: string) => query("UPDATE design_jobs SET ia_proxima_tentativa_em = NOW() - interval '1 second' WHERE id = $1", [id]);
 
 let png: Buffer;
@@ -81,7 +84,7 @@ describe("worker do kit de partida", () => {
     expect(await processarJob((await pegarProximo())!, { fetchFn: status(500) })).toBe("nova_tentativa");
     let j = await ler(jobId);
     expect(j!.stage).toBe("PROCESSANDO_IA");
-    const espera1 = (new Date(j!.ia_proxima_tentativa_em!).getTime() - Date.now()) / 1000;
+    const espera1 = await esperaNoBanco(jobId);
     expect(espera1).toBeGreaterThan(25);
     expect(espera1).toBeLessThan(35);
     expect(await pegarProximo()).toBeNull();
@@ -91,7 +94,7 @@ describe("worker do kit de partida", () => {
     expect(segundo!.tentativa).toBe(2);
     expect(await processarJob(segundo!, { fetchFn: status(500) })).toBe("nova_tentativa");
     j = await ler(jobId);
-    const espera2 = (new Date(j!.ia_proxima_tentativa_em!).getTime() - Date.now()) / 1000;
+    const espera2 = await esperaNoBanco(jobId);
     expect(espera2).toBeGreaterThan(115);
     expect(espera2).toBeLessThan(125);
 
@@ -118,7 +121,9 @@ describe("worker do kit de partida", () => {
   it("imagem nova durante o processamento descarta o resultado", async () => {
     const { jobId, leadId } = await jobComImagem();
     const pego = (await pegarProximo())!;
-    const fetchFn = ok(() => abrirOuAnexar({ leadId, origem: "VENDEDOR", imagens: [{ bytes: png, nome: "outra.png" }] }));
+    // Imagem diferente de verdade: a mesma (mesmo sha256) não conta como nova
+    const outra = await sharp({ create: { width: 200, height: 100, channels: 3, background: "#FFCC00" } }).png().toBuffer();
+    const fetchFn = ok(() => abrirOuAnexar({ leadId, origem: "VENDEDOR", imagens: [{ bytes: outra, nome: "outra.png" }] }));
     expect(await processarJob(pego, { fetchFn })).toBe("descartado");
     expect(await ler(jobId)).toMatchObject({ stage: "PROCESSANDO_IA", ia_tentativas: 0, briefing: null });
   });

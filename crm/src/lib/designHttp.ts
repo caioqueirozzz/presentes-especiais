@@ -31,7 +31,10 @@ export function erroDeDesign(err: unknown, contexto: string) {
 
 /** Arquivos de um multipart, como o design.ts recebe. */
 export async function arquivosDoForm(form: FormData, campo: string, max = 10): Promise<{ bytes: Buffer; nome: string }[]> {
-  const files = form.getAll(campo).filter((f): f is File => typeof f === "object" && f !== null && "arrayBuffer" in f);
-  if (files.length > max) throw new DesignError(`No máximo ${max} arquivos.`, 400);
+  // A ponte manda os arquivos da conversa do mais antigo ao mais recente: passando do limite, ficam os últimos
+  const files = form
+    .getAll(campo)
+    .filter((f): f is File => typeof f === "object" && f !== null && "arrayBuffer" in f)
+    .slice(-max);
   return Promise.all(files.map(async (f) => ({ bytes: Buffer.from(await f.arrayBuffer()), nome: (f.name || "arquivo").slice(0, 120) })));
 }

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
 import { extname } from "path";
-import type { ConversationState } from "../agent/state.js";
+import type { ArquivoRecebido, ConversationState } from "../agent/state.js";
 import type { BrindeMeClient } from "../integrations/brindeme/client.js";
 
 const ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".pdf", ".svg"];
@@ -14,13 +14,31 @@ export const registrarArteSchema = z.object({
 
 export type RegistrarArteInput = z.infer<typeof registrarArteSchema>;
 
+/** Arquivos que vieram na última mensagem do cliente (a que está sendo atendida agora). */
+export function arquivosDaUltimaMensagem(state: ConversationState): ArquivoRecebido[] {
+  const ultima = [...state.historico].reverse().find((m) => m.role === "user");
+  const nomes = [...(ultima?.content ?? "").matchAll(/\[ARQUIVO recebido: (.+?) \(/g)].map((m) => m[1].toLowerCase());
+  return (state.arquivosRecebidos ?? []).filter((a) => nomes.includes(a.nome.toLowerCase()));
+}
+
+/**
+ * O modelo às vezes inventa o nome ("logo-empresa.jpg") em vez de copiar o do WhatsApp ("arquivo-B8DCF53F.jpg").
+ * Se a última mensagem do cliente trouxe exatamente um arquivo, é ele; com dois ou mais, o nome tem de bater.
+ */
+function arquivoUnicoDaUltimaMensagem(state: ConversationState): ArquivoRecebido | undefined {
+  if (state.canal !== "whatsapp") return undefined;
+  const arquivos = arquivosDaUltimaMensagem(state);
+  return arquivos.length === 1 ? arquivos[0] : undefined;
+}
+
 export async function registrarArteHandler(
   input: RegistrarArteInput,
   state: ConversationState,
   _client: BrindeMeClient
 ) {
   const nomeProcurado = input.descricao_arquivo.trim().toLowerCase();
-  const recebido = state.arquivosRecebidos?.find((a) => a.nome.toLowerCase() === nomeProcurado);
+  const recebido =
+    state.arquivosRecebidos?.find((a) => a.nome.toLowerCase() === nomeProcurado) ?? arquivoUnicoDaUltimaMensagem(state);
   if (recebido) {
     // Turno repetido depois de falha chama a ferramenta de novo: mesma arte, mesma referência.
     const existente = state.artes.find((a) => a.arquivo === recebido.caminho && a.posicao === input.posicao);

@@ -132,6 +132,26 @@ describe("dupla confirmação", () => {
     expect((await one<{ stage: string }>("SELECT stage FROM orders WHERE id = $1", [o.id]))!.stage).toBe("PRODUCAO");
     expect((await query("SELECT 1 FROM order_events WHERE order_id = $1 AND to_stage = 'PRODUCAO'", [o.id])).length).toBe(1);
   });
+  it("aprovação não faz regredir pedido que já passou da produção", async () => {
+    const { d, lead, jobId } = await jobAguardando();
+    const [o] = await query<{ id: string }>(
+      "INSERT INTO orders (lead_id, phone, title, stage, code) VALUES ($1, '5511900000099', 'x', 'EXPEDICAO', 'P-T2') RETURNING id",
+      [lead]
+    );
+    await query("UPDATE design_jobs SET order_id = $2 WHERE id = $1", [jobId, o.id]);
+    await pedirConfirmacao(jobId, d);
+    await receberRespostaDoCliente(lead, "APROVO");
+    expect(await etapa(jobId)).toBe("APROVADO");
+    expect((await one<{ stage: string }>("SELECT stage FROM orders WHERE id = $1", [o.id]))!.stage).toBe("EXPEDICAO");
+  });
+  it("APROVO enviado antes do pedido de confirmação não aprova, mesmo chegando depois", async () => {
+    const { d, lead, jobId } = await jobAguardando();
+    const antes = new Date(Date.now() - 60_000).toISOString();
+    await pedirConfirmacao(jobId, d);
+    const phone = (await one<{ phone: string }>("SELECT phone FROM leads WHERE id = $1", [lead]))!.phone;
+    await ingestLiveMessage({ id: "w-velho", telefone: phone, autor: "CLIENTE", texto: "aprovo", timestamp: antes });
+    expect(await etapa(jobId)).toBe("AGUARDANDO_CLIENTE");
+  });
   it("aprovação sem pedido avisa o vendedor", async () => {
     const { d, vendedor, lead, jobId } = await jobAguardando();
     await pedirConfirmacao(jobId, d);
@@ -178,5 +198,14 @@ describe("ingestLiveMessage com job de design", () => {
     expect(await titulos(vendedor)).not.toContain("Cliente respondeu");
     await ingestLiveMessage({ id: "w-2", telefone: phone, autor: "CLIENTE", texto: "APROVO", timestamp: new Date().toISOString() });
     expect(await etapa(jobId)).toBe("APROVADO");
+  });
+
+  it("a devolução leva o id do APROVO, para a ponte não entregar essa mensagem à Lia", async () => {
+    const { d, lead, jobId } = await jobAguardando();
+    await pedirConfirmacao(jobId, d);
+    const phone = (await one<{ phone: string }>("SELECT phone FROM leads WHERE id = $1", [lead]))!.phone;
+    ponte.chamadas = [];
+    await ingestLiveMessage({ id: "w-aprovo", telefone: phone, autor: "CLIENTE", texto: "APROVO", timestamp: new Date().toISOString() });
+    expect(ponte.chamadas).toContainEqual({ path: "/devolver", body: { telefone: phone, consumidas: ["w-aprovo"] } });
   });
 });

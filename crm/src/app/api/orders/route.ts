@@ -36,7 +36,8 @@ export async function GET(request: Request) {
        ORDER BY o.due_date ASC NULLS LAST, o.created_at ASC`,
       params
     );
-    return NextResponse.json({ orders });
+    // O colaborador não vê a observação interna da gestão (igual ao detalhe em orders/[id])
+    return NextResponse.json({ orders: isAdmin(guard.user) ? orders : orders.map((o) => ({ ...o, internal_note: null })) });
   } catch (err) {
     return serverError(err, "listar pedidos");
   }
