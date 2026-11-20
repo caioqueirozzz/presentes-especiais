@@ -274,6 +274,18 @@ describe("CanalWwebjs (biblioteca falsa)", () => {
     expect(recebidas[1]).toMatchObject({ id: "d1", tipo: "midia", bytesDeclarados: 50_000_000 });
   });
 
+  it("áudio (ptt) vem com baixarMidia: sem ele a ponte não transcreve nem manda ao CRM", async () => {
+    const canal = await montar();
+    const recebidas: Array<Record<string, unknown>> = [];
+    canal.aoMensagem((m) => recebidas.push(m as unknown as Record<string, unknown>));
+    const downloadMedia = async () => ({ mimetype: "audio/ogg; codecs=opus", data: "T2dnUw==" });
+    clienteAtual().emit("message_create", msg("p1", { type: "ptt", body: "", downloadMedia }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recebidas[0]).toMatchObject({ id: "p1", tipo: "audio" });
+    const baixar = recebidas[0].baixarMidia as () => Promise<unknown>;
+    expect(await baixar()).toEqual({ mime: "audio/ogg; codecs=opus", base64: "T2dnUw==" });
+  });
+
   it("escuta só message_create; chat da própria vem de to, da recebida de from; @lid resolvido", async () => {
     const canal = await montar();
     const recebidas: unknown[] = [];

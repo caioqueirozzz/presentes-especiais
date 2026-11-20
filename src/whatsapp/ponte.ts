@@ -31,7 +31,7 @@ const SALVAR_APOS_MS = 300;
 const CONCLUIDOS_GUARDADOS = 2_000;
 const ENTREGAS_PARCIAIS_GUARDADAS = 200;
 
-export const MSG_AUDIO_FALHOU = "Não consegui ouvir seu áudio direito 🙏 Pode me mandar por escrito?";
+export const MSG_AUDIO_FALHOU = "Não consegui ouvir seu áudio direito. Pode me mandar por escrito?";
 export const MSG_INSTABILIDADE = "Estamos com uma instabilidade agora, mas já te respondemos por aqui. 🙏";
 const RECUSA_VIDEO = "[arquivo recusado: vídeo, formato não aceito (aceitos: PNG, JPG, SVG, PDF)]";
 
@@ -119,6 +119,8 @@ export class Ponte {
   private readonly armazem: ArmazemPonte;
   private readonly concluidos = new ConjuntoLimitado(5_000);
   private readonly audiosObservados = new ConjuntoLimitado(2_000);
+  /** Áudios já transcritos sem sucesso: se o aviso não saiu, a varredura só reenvia o aviso. */
+  private readonly audiosSemTexto = new ConjuntoLimitado(500);
   /** Ids sendo tratados fora da fila (aviso de áudio): a outra via que trouxer o mesmo id desiste. */
   private readonly reservados = new Set<string>();
   /** Pedidos que falharam ou não terminaram de sair, na ordem; voltam antes de qualquer lote novo da conversa. */
@@ -296,8 +298,10 @@ export class Ponte {
     if (!comIa) {
       if (this.opcoes.observador?.midia && !this.audiosObservados.has(m.id)) {
         this.audiosObservados.add(m.id);
-        const midia = await this.baixar(m);
+        const midia = await this.baixarAudio(m);
+        // Download que falhou fica livre para a próxima varredura: é o player que o atendente vai usar
         if (midia) this.observarMidia(telefone, m.id, midia, null, "NAO_TRANSCRITO");
+        else this.audiosObservados.delete(m.id);
       }
       if (!this.iaAtende(telefone)) return;
       this.concluir([m.id]);
@@ -305,19 +309,22 @@ export class Ponte {
       return;
     }
 
-    // Reservado antes do download para o áudio não chegar depois do texto que veio atrás dele
-    if (!this.fila.reservar(telefone, m.chatId, m.id)) return;
-    const midia = await this.baixar(m);
-    const texto = midia && this.opcoes.transcritor ? await this.opcoes.transcritor.transcrever(Buffer.from(midia.base64, "base64"), midia.mime) : null;
-    if (midia && !this.audiosObservados.has(m.id)) {
-      this.audiosObservados.add(m.id);
-      this.observarMidia(telefone, m.id, midia, texto, texto ? "OK" : "FALHOU");
+    if (!this.audiosSemTexto.has(m.id)) {
+      // Reservado antes do download para o áudio não chegar depois do texto que veio atrás dele
+      if (!this.fila.reservar(telefone, m.chatId, m.id)) return;
+      const midia = await this.baixarAudio(m);
+      const texto = midia && this.opcoes.transcritor ? await this.opcoes.transcritor.transcrever(Buffer.from(midia.base64, "base64"), midia.mime) : null;
+      if (midia && !this.audiosObservados.has(m.id)) {
+        this.audiosObservados.add(m.id);
+        this.observarMidia(telefone, m.id, midia, texto, texto ? "OK" : "FALHOU");
+      }
+      if (texto) {
+        this.fila.preencher(telefone, m.id, { id: m.id, timestamp: m.timestamp, texto: neutralizarMarcadores(texto).slice(0, LIMITE_TEXTO), ...nomeDoContato(m) });
+        return;
+      }
+      this.fila.cancelar(telefone, m.id);
+      this.audiosSemTexto.add(m.id);
     }
-    if (texto) {
-      this.fila.preencher(telefone, m.id, { id: m.id, timestamp: m.timestamp, texto: neutralizarMarcadores(texto).slice(0, LIMITE_TEXTO), ...nomeDoContato(m) });
-      return;
-    }
-    this.fila.cancelar(telefone, m.id);
     this.reservados.add(m.id);
     try {
       // Aviso que não sai: não conclui, e a varredura tenta de novo
@@ -338,6 +345,16 @@ export class Ponte {
       this.log({ type: "midia_nao_baixou", id: m.id, erro: String(err) });
       return null;
     }
+  }
+
+  /** O áudio sem tamanho declarado só é medido depois de baixado: acima do teto, nem Whisper nem CRM. */
+  private async baixarAudio(m: MensagemRecebida): Promise<MidiaBaixada | null> {
+    const midia = await this.baixar(m);
+    if (midia && Buffer.byteLength(midia.base64, "base64") > TAMANHO_MAXIMO_BYTES) {
+      this.log({ type: "audio_grande_demais", id: m.id });
+      return null;
+    }
+    return midia;
   }
 
   private observarMidia(telefone: string, id: string, midia: MidiaBaixada, transcricao: string | null, status: MidiaObservada["status"]): void {

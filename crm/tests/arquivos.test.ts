@@ -68,6 +68,12 @@ describe("detectarAudio", () => {
     expect(detectarAudio(b([0xff, 0xfb, 0x90, 0x00]))).toBe("mp3");
     expect(detectarAudio(b([0, 0, 0, 0x20], "ftypM4A "))).toBe("m4a");
   });
+  it("reconhece wav e webm (o Whisper aceita os dois); AMR não", () => {
+    expect(detectarAudio(b("RIFF", [0x24, 0, 0, 0], "WAVEfmt "))).toBe("wav");
+    expect(detectarAudio(b([0x1a, 0x45, 0xdf, 0xa3, 0x9f]))).toBe("webm");
+    expect(detectarAudio(b("#!AMR", [0x0a, 0, 0]))).toBeNull();
+    expect(detectarAudio(b("RIFF", [0, 0, 0, 0], "WEBPVP8 "))).toBeNull();
+  });
   it("PNG e JPEG não são áudio, e áudio não é imagem para o design", () => {
     expect(detectarAudio(b([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]))).toBeNull();
     expect(detectarAudio(b([0xff, 0xd8, 0xff, 0xe0]))).toBeNull();

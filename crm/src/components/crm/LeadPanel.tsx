@@ -361,7 +361,7 @@ function Conversation({ leadId, messages }: { leadId: string; messages: Message[
                 {m.kind === "audio" && m.has_media ? (
                   <>
                     {/* preload none: abrir o lead não baixa todos os áudios */}
-                    <audio controls preload="none" src={`/api/leads/${leadId}/messages/${m.id}/audio`} className="max-w-full" />
+                    <audio controls preload="none" aria-label="Áudio do cliente" src={`/api/leads/${leadId}/messages/${m.id}/audio`} className="max-w-full" />
                     {m.transcription_status === "OK" && m.transcription && (
                       <p className="mt-1 whitespace-pre-wrap break-words italic opacity-80">Transcrição: {m.transcription}</p>
                     )}

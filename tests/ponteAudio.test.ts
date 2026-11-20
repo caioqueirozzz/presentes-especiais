@@ -112,6 +112,51 @@ describe("Ponte: áudio do cliente", () => {
     expect(midias[0].status).toBe("NAO_TRANSCRITO");
   });
 
+  it("fora da IA, download que falhou é tentado de novo na varredura", async () => {
+    let tentativas = 0;
+    const baixarMidia = async () => (++tentativas === 1 ? null : { mime: "audio/ogg", base64: OGG_B64 });
+    const { canal, ponte, midias } = montar({ liberados: ["5583000000000"] });
+    const msg = audio(canal, { baixarMidia });
+    await ponte.receber(msg);
+    expect(midias).toEqual([]);
+    canal.naoLidas = [{ chatId: CLIENTE, mensagens: [msg] }];
+    await ponte.varrer();
+    await vi.runAllTimersAsync();
+    expect(tentativas).toBe(2);
+    expect(midias).toHaveLength(1);
+  });
+
+  it("aviso de falha que não sai: a varredura reenvia o aviso sem baixar nem transcrever de novo", async () => {
+    const t = transcritor(null);
+    const { canal, ponte, midias } = montar({ transcritor: t });
+    canal.falhar.set(MSG_AUDIO_FALHOU, 2);
+    const msg = audio(canal);
+    const recebendo = ponte.receber(msg);
+    await vi.runAllTimersAsync();
+    await recebendo;
+    expect(canal.enviadas.map((e) => e.texto)).not.toContain(MSG_AUDIO_FALHOU);
+
+    canal.naoLidas = [{ chatId: CLIENTE, mensagens: [msg] }];
+    const varrendo = ponte.varrer();
+    await vi.runAllTimersAsync();
+    await varrendo;
+    expect(canal.enviadas.map((e) => e.texto)).toEqual([MSG_AUDIO_FALHOU]);
+    expect(t.chamadas).toBe(1);
+    expect(midias).toHaveLength(1);
+  });
+
+  it("áudio sem tamanho declarado e maior que 16 MB depois do download: não transcreve nem vai ao CRM", async () => {
+    const t = transcritor("não devia");
+    const grande = "A".repeat(23_000_000); // ~17 MB decodificados
+    const { canal, ponte, midias } = montar({ transcritor: t });
+    const ouvindo = ponte.receber(audio(canal, { baixarMidia: async () => ({ mime: "audio/ogg", base64: grande }) }));
+    await vi.runAllTimersAsync();
+    await ouvindo;
+    expect(t.chamadas).toBe(0);
+    expect(midias).toEqual([]);
+    expect(canal.enviadas.map((e) => e.texto)).toEqual([MSG_AUDIO_FALHOU]);
+  });
+
   it("download falho: nada vai ao CRM e, com a IA, sai MSG_AUDIO_FALHOU", async () => {
     const t = transcritor("não devia");
     const { canal, ponte, midias } = montar({ transcritor: t });

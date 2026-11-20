@@ -95,6 +95,21 @@ describe("áudio do lead", () => {
       expect(Buffer.from(await (await arquivo(new Request(url, { headers: { range: "bytes=-5" } }))).arrayBuffer())).toEqual(AUDIO.subarray(AUDIO.length - 5));
     });
 
+    it("chave audios/ é sempre áudio: ID3 com %PDF- no começo sai como audio/mpeg", async () => {
+      await entrarComo("ADMIN");
+      const { chave } = await audioDoLead(null);
+      await armazem().salvar(chave, Buffer.concat([Buffer.from("ID3"), Buffer.from([3, 0, 0]), Buffer.from("%PDF-1.4")]), "audio/mpeg");
+      const r = await arquivo(new Request(`http://crm.local${await armazem().urlTemporaria(chave)}`));
+      expect(r.headers.get("content-type")).toBe("audio/mpeg");
+      expect(r.headers.get("content-disposition")).toBeNull();
+    });
+
+    it("Range invertido é ignorado: o arquivo inteiro (RFC 9110)", async () => {
+      const r = await arquivo(new Request(await urlAssinada(), { headers: { range: "bytes=5-2" } }));
+      expect(r.status).toBe(200);
+      expect(Buffer.from(await r.arrayBuffer())).toEqual(AUDIO);
+    });
+
     it("Range além do fim: 416; Range malformado: o arquivo inteiro", async () => {
       const url = await urlAssinada();
       const fora = await arquivo(new Request(url, { headers: { range: "bytes=500-600" } }));

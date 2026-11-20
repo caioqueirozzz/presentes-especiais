@@ -8,6 +8,8 @@ import type { MensagemObservada, MidiaObservada, ObservadorPonte } from "./ponte
  */
 
 const MAX_FILA = 2_000;
+// Com o CRM fora por muito tempo, os áudios em base64 não podem crescer sem limite na memória da ponte
+const MAX_BYTES_MIDIAS = 50 * 1024 * 1024;
 const INTERVALO_MS = 2_000;
 const ESPERA_MAX_MS = 60_000;
 const ATRASO_CONVERSA_MS = 1_500;
@@ -63,8 +65,25 @@ export class ObservadorCrm implements ObservadorPonte {
       this.fila.shift();
       this.log({ type: "crm_fila_cheia" });
     }
+    if (item.rota === "midias") this.abrirEspacoParaMidia(item.corpo.base64.length);
     this.fila.push(item);
     void this.esvaziar();
+  }
+
+  /** Descarta os áudios mais antigos até o novo caber; o que está sendo enviado agora não sai (o shift dele viria depois). */
+  private abrirEspacoParaMidia(novo: number): void {
+    let total = novo;
+    for (const i of this.fila) if (i.rota === "midias") total += i.corpo.base64.length;
+    for (let k = this.enviando ? 1 : 0; total > MAX_BYTES_MIDIAS && k < this.fila.length; ) {
+      const i = this.fila[k];
+      if (i.rota !== "midias") {
+        k++;
+        continue;
+      }
+      this.fila.splice(k, 1);
+      total -= i.corpo.base64.length;
+      this.log({ type: "crm_midia_descartada", id: i.corpo.id, telefone: i.corpo.telefone });
+    }
   }
 
   private async esvaziar(): Promise<void> {

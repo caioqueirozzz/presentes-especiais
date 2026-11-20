@@ -354,7 +354,7 @@ export class CanalWwebjs implements CanalWhatsApp {
     if (!msg.fromMe && typeof dados?.notifyName === "string" && dados.notifyName.trim()) {
       recebida.nomeContato = dados.notifyName.trim();
     }
-    if (tipo === "midia") {
+    if (tipo === "midia" || tipo === "audio") {
       recebida.baixarMidia = async () => {
         const midia = await msg.downloadMedia();
         if (!midia) return null;

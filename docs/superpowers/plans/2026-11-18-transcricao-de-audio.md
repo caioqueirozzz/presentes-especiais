@@ -17,7 +17,7 @@
 - Modelo: `process.env.TRANSCRICAO_MODELO || "whisper-1"`, com `language: "pt"` e `response_format: "text"`. Chave: a `OPENAI_API_KEY` que já existe.
 - 3 tentativas, timeout de 60 s cada (`new OpenAI({ timeout: 60_000, maxRetries: 0 })`), pausas de 1 s e 3 s entre elas.
 - Teto de 16 MB (`TAMANHO_MAXIMO_BYTES` na ponte, `LIMITE_BYTES` no CRM).
-- Mensagem fixa: `MSG_AUDIO_FALHOU = "Não consegui ouvir seu áudio direito 🙏 Pode me mandar por escrito?"`. A `MSG_AUDIO` sai.
+- Mensagem fixa: `MSG_AUDIO_FALHOU = "Não consegui ouvir seu áudio direito. Pode me mandar por escrito?"`. A `MSG_AUDIO` sai.
 - O log nunca leva o texto transcrito nem os bytes.
 - Repositório público: nenhum áudio real em fixture, commit ou issue. As fixtures usam `OggS` seguido de zeros e transcrições inventadas.
 - Banco do CRM: só o Docker (5440, banco `crm`). Nunca migration do CRM contra Neon.
@@ -405,7 +405,7 @@ import type { Transcritor } from "./transcricao.js";
 Troque a constante `MSG_AUDIO` por:
 
 ```ts
-export const MSG_AUDIO_FALHOU = "Não consegui ouvir seu áudio direito 🙏 Pode me mandar por escrito?";
+export const MSG_AUDIO_FALHOU = "Não consegui ouvir seu áudio direito. Pode me mandar por escrito?";
 ```
 
 Depois de `MensagemObservada`:

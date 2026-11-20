@@ -105,7 +105,7 @@ só conclui. Passa a ser assim:
 
 Constante nova, no lugar da `MSG_AUDIO` (que sai):
 ```ts
-export const MSG_AUDIO_FALHOU = "Não consegui ouvir seu áudio direito 🙏 Pode me mandar por escrito?";
+export const MSG_AUDIO_FALHOU = "Não consegui ouvir seu áudio direito. Pode me mandar por escrito?";
 ```
 
 O `Transcritor` entra na ponte pelas `OpcoesPonte` (campo `transcritor?`), para o teste injetar um falso. Sem

@@ -35,14 +35,16 @@ export function detectarTipo(bytes: Uint8Array): TipoArquivo | null {
 
 export const ehAnalisavel = (t: TipoArquivo) => t === "png" || t === "jpeg" || t === "webp";
 
-export type TipoAudio = "ogg" | "mp3" | "m4a";
-export const MIME_AUDIO: Record<TipoAudio, string> = { ogg: "audio/ogg", mp3: "audio/mpeg", m4a: "audio/mp4" };
+export type TipoAudio = "ogg" | "mp3" | "m4a" | "wav" | "webm";
+export const MIME_AUDIO: Record<TipoAudio, string> = { ogg: "audio/ogg", mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", webm: "audio/webm" };
 
 /** Áudio pelos primeiros bytes. Fora do detectarTipo para o design não aceitar nota de voz como referência. */
 export function detectarAudio(bytes: Uint8Array): TipoAudio | null {
   const ascii = (i: number, s: string) => [...s].every((c, k) => bytes[i + k] === c.charCodeAt(0));
   if (ascii(0, "OggS")) return "ogg"; // o ptt do WhatsApp (Opus)
   if (ascii(4, "ftyp")) return "m4a";
+  if (ascii(0, "RIFF") && ascii(8, "WAVE")) return "wav";
+  if (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) return "webm";
   if (ascii(0, "ID3") || (bytes[0] === 0xff && (bytes[1] ?? 0) >= 0xe0)) return "mp3";
   return null;
 }

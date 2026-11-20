@@ -40,6 +40,7 @@ async function main(): Promise<void> {
         log
       )
     : undefined;
+  if (!transcritor) log({ type: "transcricao_desligada", motivo: "OPENAI_API_KEY ausente: todo áudio com a IA vira pedido de texto" });
   const ponte = new Ponte(
     canal,
     criarClienteHttp(config.agente.url, w.agenteTimeoutMs),
