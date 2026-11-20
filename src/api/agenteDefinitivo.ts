@@ -357,7 +357,7 @@ function registrarArquivos(estado: ConversationState, novas: MensagemLote[]): vo
   const lista = (estado.arquivosRecebidos ??= []);
   for (const m of novas) {
     if (m.arquivo && !lista.some((a) => a.caminho === m.arquivo!.caminho)) {
-      lista.push({ nome: m.arquivo.nome, caminho: m.arquivo.caminho, mime: m.arquivo.mime, bytes: m.arquivo.bytes });
+      lista.push({ nome: m.arquivo.nome, caminho: m.arquivo.caminho, mime: m.arquivo.mime, bytes: m.arquivo.bytes, recebidoEm: m.timestamp });
     }
   }
 }

@@ -78,6 +78,19 @@ export interface OpcoesControle {
 
 export function tratadorControle(opcoes: OpcoesControle): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   const { canal, ponte, lia, segredo, log } = opcoes;
+  // O CRM desiste em 20 s e o designer clica de novo com a foto já entregue: a mesma chave devolve o 1º envio
+  const enviosRecentes = new Map<string, { em: number; id: Promise<string> }>();
+  const enviarUmaVez = (chave: string, enviar: () => Promise<string>): Promise<string> => {
+    const agora = Date.now();
+    for (const [k, v] of enviosRecentes) if (agora - v.em > 120_000) enviosRecentes.delete(k);
+    if (!chave) return enviar();
+    const atual = enviosRecentes.get(chave);
+    if (atual) return atual.id;
+    const id = enviar();
+    enviosRecentes.set(chave, { em: agora, id });
+    id.catch(() => enviosRecentes.delete(chave));
+    return id;
+  };
   return async (req, res) => {
     if (!autorizado(req, segredo)) return responder(res, 401, { erro: "não autorizado" });
     try {
@@ -113,12 +126,14 @@ export function tratadorControle(opcoes: OpcoesControle): (req: IncomingMessage,
         const telefone = typeof corpo.telefone === "string" ? corpo.telefone.replace(/\D/g, "") : "";
         const url = typeof corpo.url === "string" ? corpo.url : "";
         const legenda = typeof corpo.legenda === "string" ? corpo.legenda : "";
+        // A legenda entra na chave: reenvio corrigido da mesma versão tem de chegar
+        const chave = typeof corpo.chave === "string" ? `${telefone}:${legenda}:${corpo.chave.slice(0, 200)}` : "";
         if (telefone.length < 10 || !urlAceita(url) || legenda.length > 1_000) {
           return responder(res, 400, { erro: "telefone, url (https ou local) e legenda de até 1.000 caracteres" });
         }
         if (canal.situacao().estado !== "CONECTADO") return responder(res, 409, { erro: "O WhatsApp não está conectado." });
         // Fora do registro de saída da Lia de propósito: o eco chega como atendente e a Lia pausa
-        const id = await canal.enviarImagemParaTelefone(telefone, url, legenda);
+        const id = await enviarUmaVez(chave, () => canal.enviarImagemParaTelefone(telefone, url, legenda));
         return responder(res, 200, { id });
       }
       if (req.method === "POST" && req.url === "/encaminhar-design") {

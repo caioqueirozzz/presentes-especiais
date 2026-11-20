@@ -70,10 +70,16 @@ export async function PATCH(request: Request, { params }: Context) {
       if (!admins?.n) return jsonError("É preciso manter pelo menos um admin ativo.", 400);
     }
 
+    const papelMudou = (body.role === "ADMIN" || body.role === "COLABORADOR" || body.role === "DESIGNER") && body.role !== member.role;
+    const desativou = body.is_active === false;
+    // Designer não recebe leads: quem vira designer devolve os seus como quem é desativado
+    const devolveLeads = desativou || (papelMudou && body.role === "DESIGNER");
+    const saiDoDesign = member.role === "DESIGNER" && (desativou || papelMudou);
+
     let returned = 0;
     await transaction(async (tx) => {
       await tx.query(`UPDATE users SET ${sets.join(", ")} WHERE id = $1`, values);
-      if (body.is_active === false) {
+      if (devolveLeads) {
         const rows = await tx.query(
           "UPDATE leads SET assigned_to = NULL, assigned_at = NULL WHERE assigned_to = $1 AND stage NOT IN ('GANHO','PERDIDO') RETURNING id",
           [id]
@@ -83,9 +89,13 @@ export async function PATCH(request: Request, { params }: Context) {
           await tx.query("INSERT INTO lead_events (lead_id, user_id, type, data) VALUES ($1, $2, 'ATRIBUICAO', $3)", [
             r.id,
             guard.user.id,
-            JSON.stringify({ para: null, motivo: "colaborador desativado" }),
+            JSON.stringify({ para: null, motivo: desativou ? "colaborador desativado" : "virou designer" }),
           ]);
         }
+      }
+      // Job com dono que não é mais designer ninguém assume; sem dono, os outros designers veem e assumem (D15)
+      if (saiDoDesign) {
+        await tx.query("UPDATE design_jobs SET designer_id = NULL, updated_at = NOW() WHERE designer_id = $1 AND stage NOT IN ('APROVADO','CANCELADO')", [id]);
       }
     });
 

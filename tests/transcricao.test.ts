@@ -36,6 +36,13 @@ describe("transcritorOpenAI", () => {
     expect((chamadas[0].file as File).name).toBe("audio.ogg");
   });
 
+  it("modelo gpt-4o-*-transcribe pede json, que é o que ele aceita", async () => {
+    const { c, chamadas } = cliente([{ text: "quero vinte squeezes" }]);
+    const t = transcritorOpenAI(c, "gpt-4o-mini-transcribe", () => {}, async () => {});
+    expect(await t.transcrever(OGG, "audio/ogg")).toBe("quero vinte squeezes");
+    expect(chamadas[0].response_format).toBe("json");
+  });
+
   it("texto vazio ou só pontuação vira null", async () => {
     expect(await montar(["   "]).t.transcrever(OGG, "audio/ogg")).toBeNull();
     expect(await montar([" ... "]).t.transcrever(OGG, "audio/ogg")).toBeNull();

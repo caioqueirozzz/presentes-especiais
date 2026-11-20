@@ -57,6 +57,15 @@ describe("runTurn — Fase 4", () => {
   });
   afterEach(() => setBaseConhecimento(null));
 
+  it("texto do cliente com $' $& $` entra literal no ESTADO do prompt do sistema", async () => {
+    const state = createInitialState(TEL);
+    state.cliente = { ...state.cliente, nome: "Ana $' $& $`" };
+    const llm = new ScriptedLLM([endTurn("oi")]);
+    await runTurn("oi", state, llm, new MockBrindeMeClient(), new Logger(state.conversaId));
+    expect(llm.sistemas[0]).toContain(JSON.stringify("Ana $' $& $`"));
+    expect(llm.sistemas[0]).not.toContain("{{ESTADO}}");
+  });
+
   it("sinal já cancelado: rejeita sem chamar o modelo", async () => {
     const llm = new ScriptedLLM([endTurn("oi")]);
     const controle = new AbortController();

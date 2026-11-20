@@ -65,8 +65,9 @@ export function transcritorOpenAI(
       for (let tentativa = 1; tentativa <= TENTATIVAS; tentativa++) {
         try {
           const file = await toFile(dados, `audio.${extensao(mime)}`, { type: mime.split(";")[0].trim() });
-          // verbose_json traz o no_speech_prob de cada trecho, que separa fala de barulho
-          const r = await cliente.audio.transcriptions.create({ file, model: modelo, language: "pt", response_format: "verbose_json", prompt: PROMPT_TRANSCRICAO });
+          // Só o whisper aceita verbose_json (que traz o no_speech_prob); os gpt-4o-*-transcribe só json/text
+          const formato = modelo.startsWith("whisper") ? "verbose_json" : "json";
+          const r = await cliente.audio.transcriptions.create({ file, model: modelo, language: "pt", response_format: formato, prompt: PROMPT_TRANSCRICAO });
           const texto = (typeof r === "string" ? r : String((r as { text?: unknown })?.text ?? "")).trim();
           return semFala(texto, (r as { segments?: unknown })?.segments) ? null : texto;
         } catch (err) {

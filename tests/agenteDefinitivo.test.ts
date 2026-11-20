@@ -270,7 +270,7 @@ describe("AgenteDefinitivo", () => {
     const arquivo = { caminho: "C:/artes/abc.png", mime: "image/png", bytes: 2_048, nome: "logo.png" };
     await agente.processarLote({ turnoId: calcularTurnoId(["f9"]), telefone: TEL, mensagens: [{ id: "f9", timestamp: T, texto: "", arquivo }] });
     const c = await repo.carregar(TEL);
-    expect(c.estado.arquivosRecebidos).toEqual([{ nome: "logo.png", caminho: "C:/artes/abc.png", mime: "image/png", bytes: 2_048 }]);
+    expect(c.estado.arquivosRecebidos).toEqual([{ nome: "logo.png", caminho: "C:/artes/abc.png", mime: "image/png", bytes: 2_048, recebidoEm: T }]);
     expect(c.estado.artes[0].arquivo).toBe("C:/artes/abc.png");
   });
 });

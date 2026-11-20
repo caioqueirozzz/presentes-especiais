@@ -57,6 +57,15 @@ describe("encaminharParaDesign", () => {
     expect(recebido.corpo).toContain("referencia_uniforme");
     expect(recebido.corpo.match(/name="imagem"/g)).toHaveLength(2);
   });
+  it("manda quando cada imagem chegou, na mesma ordem (o CRM corta o pedido anterior)", async () => {
+    const comData = [
+      { ...arquivos[0], recebidoEm: "2026-11-18T15:00:00.000Z" },
+      { ...arquivos[1], recebidoEm: "2026-11-19T14:30:00.000Z" },
+    ];
+    await encaminharParaDesign({ telefone: "5511900000001", origem: "LIA", arquivos: comData });
+    const datas = [...recebido.corpo.matchAll(/name="imagem_recebida_em"\r\n\r\n([^\r]*)/g)].map((m) => m[1]);
+    expect(datas).toEqual(["2026-11-18T15:00:00.000Z", "2026-11-19T14:30:00.000Z"]);
+  });
   it("com mais de 10 arquivos na conversa, manda só os 10 mais recentes", async () => {
     const muitos = Array.from({ length: 12 }, (_, i) => ({ ...arquivos[0], nome: `f${i + 1}.png` }));
     const r = await encaminharParaDesign({ telefone: "5511900000001", origem: "LIA", arquivos: muitos });

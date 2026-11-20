@@ -87,29 +87,29 @@ describe("Ponte: áudio do cliente", () => {
     expect(midias[0].status).toBe("FALHOU");
   });
 
-  it("com humano: não chama o transcritor, não vai ao agente e o CRM recebe NAO_TRANSCRITO", async () => {
-    const t = transcritor("não devia");
+  it("com humano: transcreve só para o CRM, não vai ao agente", async () => {
+    const t = transcritor("aumenta a logo");
     const { canal, agente, ponte, midias } = montar({ transcritor: t });
     await ponte.receber(canal.mensagem({ chatId: CLIENTE, texto: "assumi", deMim: true }));
     await ponte.receber(audio(canal));
     await vi.runAllTimersAsync();
-    expect(t.chamadas).toBe(0);
+    expect(t.chamadas).toBe(1);
     expect(agente.lotes).toEqual([]);
-    expect(midias).toEqual([expect.objectContaining({ status: "NAO_TRANSCRITO", transcricao: null })]);
+    expect(midias).toEqual([expect.objectContaining({ status: "OK", transcricao: "aumenta a logo" })]);
   });
 
-  it("número fora da IA: NAO_TRANSCRITO, uma vez só mesmo varrido de novo", async () => {
-    const t = transcritor("não devia");
+  it("número fora da IA: transcreve uma vez só, mesmo varrido de novo", async () => {
+    const t = transcritor("quero bonés");
     const { canal, agente, ponte, midias } = montar({ transcritor: t, liberados: ["5583000000000"] });
     const msg = audio(canal);
     await ponte.receber(msg);
     canal.naoLidas = [{ chatId: CLIENTE, mensagens: [msg] }];
     await ponte.varrer();
     await vi.runAllTimersAsync();
-    expect(t.chamadas).toBe(0);
+    expect(t.chamadas).toBe(1);
     expect(agente.lotes).toEqual([]);
     expect(midias).toHaveLength(1);
-    expect(midias[0].status).toBe("NAO_TRANSCRITO");
+    expect(midias[0]).toMatchObject({ status: "OK", transcricao: "quero bonés" });
   });
 
   it("fora da IA, download que falhou é tentado de novo na varredura", async () => {
@@ -166,6 +166,37 @@ describe("Ponte: áudio do cliente", () => {
     expect(midias).toEqual([]);
     expect(t.chamadas).toBe(0);
     expect(canal.enviadas.map((e) => e.texto)).toEqual([MSG_AUDIO_FALHOU]);
+  });
+
+  it("cota: do 21º áudio na mesma hora em diante não chama o Whisper e sai MSG_AUDIO_FALHOU; depois de 1 h volta", async () => {
+    const t = transcritor("quero canecas");
+    const { canal, ponte } = montar({ transcritor: t });
+    for (let i = 0; i < 21; i++) {
+      const p = ponte.receber(audio(canal));
+      await vi.runAllTimersAsync();
+      await p;
+    }
+    expect(t.chamadas).toBe(20);
+    expect(canal.enviadas.map((e) => e.texto)).toContain(MSG_AUDIO_FALHOU);
+    vi.advanceTimersByTime(3_600_000);
+    const p = ponte.receber(audio(canal));
+    await vi.runAllTimersAsync();
+    await p;
+    expect(t.chamadas).toBe(21);
+  });
+
+  it("download que falha não gasta a cota", async () => {
+    const t = transcritor("quero canecas");
+    const { canal, ponte } = montar({ transcritor: t });
+    for (let i = 0; i < 20; i++) {
+      const p = ponte.receber(audio(canal, { baixarMidia: async () => null }));
+      await vi.runAllTimersAsync();
+      await p;
+    }
+    const p = ponte.receber(audio(canal));
+    await vi.runAllTimersAsync();
+    await p;
+    expect(t.chamadas).toBe(1);
   });
 
   it("áudio declarado com mais de 16 MB não é baixado", async () => {

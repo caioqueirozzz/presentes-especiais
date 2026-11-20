@@ -127,7 +127,8 @@ function loadSystemPrompt(state: ConversationState, pedidosDoCliente: PedidoDoCl
   return template
     .replace(/\{\{ASSISTANT_NAME\}\}/g, config.assistantName)
     .replace(/\{\{STORE_NAME\}\}/g, config.storeName)
-    .replace("{{ESTADO}}", JSON.stringify(stateForPrompt, null, 2));
+    // Função, não string: o replace com string interpretaria $' $& $` vindos do texto do cliente
+    .replace("{{ESTADO}}", () => JSON.stringify(stateForPrompt, null, 2));
 }
 
 export interface TurnResult {

@@ -21,6 +21,8 @@ export interface ArquivoRecebido {
   caminho: string;
   mime: string;
   bytes: number;
+  /** Quando a mensagem chegou: o CRM deixa de fora do job novo o que é do pedido anterior. */
+  recebidoEm?: string;
 }
 
 /**

@@ -5,6 +5,7 @@ import { arredondar } from "../integrations/brindeme/mappers.js";
 import type { ConversationState } from "../agent/state.js";
 import { cotacaoValida, cotarAoVivo, cotou, guardarCotacoes, type Cotacao } from "../catalogo/cotacao.js";
 import { ehSobDemanda } from "../catalogo/sobDemanda.js";
+import { normalizar } from "../busca/texto.js";
 import { SEM_ESTOQUE_OFERECA_HUMANO } from "./cartao.js";
 import { lembrarDetalhado, marcaUltimaMensagemCliente, type FichaPedido } from "../agent/state.js";
 
@@ -15,6 +16,7 @@ export const prepararOrcamentoSchema = z.object({
   email: z.string().email().describe("E-mail válido do cliente"),
   itens: z.array(z.object({
     subproduto_id: z.string(),
+    cor: z.string().max(60).optional().describe("Cor que o cliente pediu, como aparece na lista de cores (ex.: 'Preto'); o código confere com o subproduto_id"),
     quantidade: z.number().int().min(1),
   })).min(1).max(100),
   prazo_desejado: z.string().max(100).optional().describe("Prazo nas palavras do cliente, sem converter para data (ex.: 'até 20/11'); omita se ele não disse"),
@@ -94,9 +96,23 @@ export async function prepararOrcamentoHandler(
         cache.set(produtoId, p);
       }
 
-      const sub = p.subproducts.find((x) => x.id === item.subproduto_id);
+      let sub = p.subproducts.find((x) => x.id === item.subproduto_id);
       if (!sub) {
         return { erro: "subproduto_nao_encontrado", subproduto_id: item.subproduto_id };
+      }
+      // O modelo copia o UUID da cor vizinha na lista (teste de 19/11): a cor em texto decide
+      if (pedido.cor && normalizar(pedido.cor) !== normalizar(sub.color)) {
+        const daCor = p.subproducts.find((x) => x.status && normalizar(x.color) === normalizar(pedido.cor!));
+        if (!daCor) {
+          return {
+            erro: "cor_nao_encontrada",
+            cor_pedida: pedido.cor,
+            cores_disponiveis: p.subproducts.filter((x) => x.status).map((x) => x.color),
+            instrucao: "Essa cor não existe neste produto. Ofereça ao cliente as cores_disponiveis e chame preparar_orcamento de novo com a que ele escolher.",
+          };
+        }
+        sub = daCor;
+        item.subproduto_id = daCor.id;
       }
       // Produto desativado na loja com a cor ainda ativa: buscar_produtos já não o sugere, o orçamento também não.
       if (!p.status) {
@@ -170,7 +186,7 @@ export async function prepararOrcamentoHandler(
       anterior !== undefined &&
       anterior.resumo.tipo === input.tipo &&
       anterior.resumo.email.trim().toLowerCase() === input.email.trim().toLowerCase() &&
-      chaveDosItens(anterior.resumo.itens) === chaveDosItens(input.itens);
+      chaveDosItens(anterior.resumo.itens) === chaveDosItens(itensSumario);
 
     // Já mostrada e o cliente respondeu: vai à equipe a ficha que ele viu, não a reescrita (20/11 virou 2023-11-20),
     // e pedir confirmação de novo prendia o cliente num laço de "pode enviar" (conversas reais de 25/10).

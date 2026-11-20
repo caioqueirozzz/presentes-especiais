@@ -39,6 +39,16 @@ describe("prepararOrcamento", () => {
     });
   });
 
+  it("cor em texto vence o subproduto_id copiado errado (teste de 19/11: pediu preto, veio o id do verde)", async () => {
+    const r = await prepararOrcamentoHandler({ ...validInput, itens: [{ subproduto_id: "sub-001-branco", cor: "preto", quantidade: 50 }] }, state, client);
+    expect(r).toMatchObject({ status: "estimativa_pronta", resumo: { itens: [{ subproduto_id: "sub-001-preto", cor: "Preto" }] } });
+  });
+
+  it("cor que o produto não tem: erro com as cores disponíveis, sem orçamento", async () => {
+    const r = await prepararOrcamentoHandler({ ...validInput, itens: [{ subproduto_id: "sub-001-branco", cor: "Roxo", quantidade: 50 }] }, state, client);
+    expect(r).toMatchObject({ erro: "cor_nao_encontrada", cores_disponiveis: ["Branco", "Preto"] });
+  });
+
   it("retorna a estimativa com o aviso de que a equipe confirma personalização, frete e prazo", async () => {
     const result = await prepararOrcamentoHandler(validInput, state, client) as {
       status: string;
@@ -240,6 +250,13 @@ describe("transferir_humano com orcamento_para_emitir (R5: o agente estima, pess
     const r = await prepararOrcamentoHandler(validInput, state, client);
     expect(r).toMatchObject({ status: "ficha_ja_apresentada" });
     expect(JSON.stringify(r)).not.toMatch(/pergunte se pode enviar/);
+  });
+
+  it("id da cor corrigido pela cor em texto: o 'pode enviar' com o mesmo id errado ainda é a mesma ficha", async () => {
+    const corrigido = { ...validInput, itens: [{ subproduto_id: "sub-001-branco", cor: "Preto", quantidade: 50 }] };
+    await prepararOrcamentoHandler(corrigido, state, client);
+    addMessage(state, "user", "pode enviar");
+    expect(await prepararOrcamentoHandler(corrigido, state, client)).toMatchObject({ status: "ficha_ja_apresentada" });
   });
 
   it("a ficha que vai à equipe é a que o cliente viu, não a reescrita pelo modelo (prazo 20/11 virou 2023-11-20)", async () => {

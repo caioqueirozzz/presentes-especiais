@@ -32,6 +32,7 @@ const CONCLUIDOS_GUARDADOS = 2_000;
 const ENTREGAS_PARCIAIS_GUARDADAS = 200;
 
 export const MSG_AUDIO_FALHOU = "Não consegui ouvir seu áudio direito. Pode me mandar por escrito?";
+const AUDIOS_POR_HORA = 20;
 export const MSG_INSTABILIDADE = "Estamos com uma instabilidade agora, mas já te respondemos por aqui. 🙏";
 const RECUSA_VIDEO = "[arquivo recusado: vídeo, formato não aceito (aceitos: PNG, JPG, SVG, PDF)]";
 
@@ -121,6 +122,7 @@ export class Ponte {
   private readonly audiosObservados = new ConjuntoLimitado(2_000);
   /** Áudios já transcritos sem sucesso: se o aviso não saiu, a varredura só reenvia o aviso. */
   private readonly audiosSemTexto = new ConjuntoLimitado(500);
+  private readonly audiosTranscritos = new Map<string, number[]>();
   /** Ids sendo tratados fora da fila (aviso de áudio): a outra via que trouxer o mesmo id desiste. */
   private readonly reservados = new Set<string>();
   /** Pedidos que falharam ou não terminaram de sair, na ordem; voltam antes de qualquer lote novo da conversa. */
@@ -292,7 +294,23 @@ export class Ponte {
     this.fila.adicionar(telefone, m.chatId, { id: m.id, timestamp: m.timestamp, texto, ...nomeDoContato(m) });
   }
 
-  /** Todo áudio do cliente vai ao CRM uma vez; só com a IA atendendo ele é transcrito e entra no lote. */
+  /** Todo áudio do cliente vai ao CRM uma vez, transcrito; só com a IA atendendo ele entra no lote. */
+  /** Cada transcrição custa no Whisper. shortcut: cota só em memória, zera ao reiniciar a ponte; ir para o banco se aparecer abuso real. */
+  private dentroDaCota(telefone: string): boolean {
+    const agora = Date.now();
+    const recentes = (this.audiosTranscritos.get(telefone) ?? []).filter((t) => agora - t < 3_600_000);
+    const cabe = recentes.length < AUDIOS_POR_HORA;
+    if (cabe) recentes.push(agora);
+    else this.log({ type: "audio_cota_excedida", telefone });
+    this.audiosTranscritos.set(telefone, recentes);
+    return cabe;
+  }
+
+  private async transcrever(telefone: string, midia: MidiaBaixada): Promise<string | null> {
+    if (!this.opcoes.transcritor || !this.dentroDaCota(telefone)) return null;
+    return this.opcoes.transcritor.transcrever(Buffer.from(midia.base64, "base64"), midia.mime);
+  }
+
   private async receberAudio(telefone: string, m: MensagemRecebida): Promise<void> {
     const comIa = this.iaAtende(telefone) && this.atendimento.modo(telefone) === "ia";
     if (!comIa) {
@@ -300,8 +318,10 @@ export class Ponte {
         this.audiosObservados.add(m.id);
         const midia = await this.baixarAudio(m);
         // Download que falhou fica livre para a próxima varredura: é o player que o atendente vai usar
-        if (midia) this.observarMidia(telefone, m.id, midia, null, "NAO_TRANSCRITO");
-        else this.audiosObservados.delete(m.id);
+        if (midia) {
+          const texto = await this.transcrever(telefone, midia);
+          this.observarMidia(telefone, m.id, midia, texto, texto ? "OK" : "FALHOU");
+        } else this.audiosObservados.delete(m.id);
       }
       if (!this.iaAtende(telefone)) return;
       this.concluir([m.id]);
@@ -313,7 +333,7 @@ export class Ponte {
       // Reservado antes do download para o áudio não chegar depois do texto que veio atrás dele
       if (!this.fila.reservar(telefone, m.chatId, m.id)) return;
       const midia = await this.baixarAudio(m);
-      const texto = midia && this.opcoes.transcritor ? await this.opcoes.transcritor.transcrever(Buffer.from(midia.base64, "base64"), midia.mime) : null;
+      const texto = midia ? await this.transcrever(telefone, midia) : null;
       if (midia && !this.audiosObservados.has(m.id)) {
         this.audiosObservados.add(m.id);
         this.observarMidia(telefone, m.id, midia, texto, texto ? "OK" : "FALHOU");

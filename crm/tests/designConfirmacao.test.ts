@@ -3,10 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const ponte = vi.hoisted(() => ({ chamadas: [] as Array<{ path: string; body: unknown }>, falhar: new Set<string>() }));
+const ponte = vi.hoisted(() => ({
+  chamadas: [] as Array<{ path: string; body: unknown }>,
+  falhar: new Set<string>(),
+  segurar: null as Promise<void> | null,
+}));
 vi.mock("@/lib/whatsapp", () => ({
   callPonte: async (path: string, body: unknown) => {
     ponte.chamadas.push({ path, body });
+    if (path === "/enviar-midia" && ponte.segurar) await ponte.segurar;
     return ponte.falhar.has(path) ? { ok: false, status: 503, error: "fora", offline: true } : { ok: true, data: { id: "msg-1" } };
   },
 }));
@@ -36,6 +41,7 @@ beforeEach(async () => {
   await limparBanco();
   ponte.chamadas = [];
   ponte.falhar.clear();
+  ponte.segurar = null;
 });
 
 describe("ehAprovacao", () => {
@@ -67,6 +73,7 @@ describe("mockup e envio", () => {
     expect(envio.url.startsWith("http://127.0.0.1:")).toBe(true);
     expect(envio.url).toContain("/api/design/arquivo?chave=");
     expect(envio.legenda).toBe("Segue a arte");
+    expect((envio as unknown as { chave: string }).chave).toBe(`mockup:${jobId}:1`);
     const j = await one<{ conversa_com_designer: boolean }>("SELECT conversa_com_designer FROM design_jobs WHERE id = $1", [jobId]);
     expect(j!.conversa_com_designer).toBe(true);
     expect((await one<{ agent_mode: string }>("SELECT agent_mode FROM leads WHERE id = $1", [lead]))!.agent_mode).toBe("humano");
@@ -90,6 +97,24 @@ describe("mockup e envio", () => {
 });
 
 describe("dupla confirmação", () => {
+  it("Ajustes durante o envio do pedido de confirmação: não rearma, e o APROVO depois da v2 não aprova a v1", async () => {
+    const { d, lead, jobId } = await jobAguardando();
+    let soltar!: () => void;
+    ponte.segurar = new Promise<void>((r) => (soltar = r));
+    const pedindo = pedirConfirmacao(jobId, d);
+    await vi.waitFor(() => expect(ponte.chamadas.filter((c) => c.path === "/enviar-midia")).toHaveLength(2));
+    await mudarEtapa(jobId, "AJUSTES", d);
+    soltar();
+    await expect(pedindo).rejects.toBeInstanceOf(DesignError);
+    ponte.segurar = null;
+    const j = await one<{ confirmacao_pedida_em: string | null }>("SELECT confirmacao_pedida_em FROM design_jobs WHERE id = $1", [jobId]);
+    expect(j!.confirmacao_pedida_em).toBeNull();
+    const { versao } = await anexarMockup(jobId, { bytes: PNG, nome: "v2.png" }, d);
+    await enviarMockup(jobId, versao, "v2", d);
+    expect(await receberRespostaDoCliente(lead, "APROVO")).toBe("sem_confirmacao_pendente");
+    expect(await etapa(jobId)).toBe("AGUARDANDO_CLIENTE");
+  });
+
   it("sem confirmação pendente, nada acontece", async () => {
     const { lead, jobId } = await jobAguardando();
     expect(await receberRespostaDoCliente(lead, "APROVO")).toBe("sem_confirmacao_pendente");

@@ -46,10 +46,10 @@ export async function registrarEvento(tx: Executor, jobId: string, atorId: strin
   await tx.query("INSERT INTO design_events (job_id, actor_id, tipo, dados) VALUES ($1, $2, $3, $4)", [jobId, atorId, tipo, JSON.stringify(dados)]);
 }
 
-type ImagemValida = { bytes: Buffer; nome: string; tipo: TipoArquivo; sha256: string };
+type ImagemValida = { bytes: Buffer; nome: string; recebidoEm?: string; tipo: TipoArquivo; sha256: string };
 
 /** Arquivo vazio, grande demais ou de tipo não aceito é pulado (e registrado): um arquivo ruim não derruba o lote. */
-function validarImagens(imagens: { bytes: Buffer; nome: string }[]): { validas: ImagemValida[]; ignorados: string[] } {
+function validarImagens(imagens: { bytes: Buffer; nome: string; recebidoEm?: string }[]): { validas: ImagemValida[]; ignorados: string[] } {
   const validas: ImagemValida[] = [];
   const ignorados: string[] = [];
   for (const i of imagens) {
@@ -93,7 +93,7 @@ export async function abrirOuAnexar(p: {
   motivo?: string;
   observacao?: string;
   prioridade?: "normal" | "alta";
-  imagens: { bytes: Buffer; nome: string }[];
+  imagens: { bytes: Buffer; nome: string; recebidoEm?: string }[];
 }): Promise<{ jobId: string; criado: boolean; ignorados?: string[] }> {
   const { validas, ignorados } = validarImagens(p.imagens);
   const ator = p.requestedBy ?? null;
@@ -123,7 +123,27 @@ export async function abrirOuAnexar(p: {
           (r) => r.sha256
         )
       );
-      const imagens = validas.filter((img) => !jaTem.has(img.sha256) && jaTem.add(img.sha256));
+      // O que é do pedido anterior fica de fora, com o mesmo corte do briefing (D14): chegou depois do último job aprovado.
+      // Job cancelado não fecha pedido: cancelar e reabrir mantém os arquivos (teste de 19/11)
+      const [{ corte }] = await tx.query<{ corte: Date | null }>(
+        "SELECT MAX(updated_at) AS corte FROM design_jobs WHERE lead_id = $1 AND id <> $2 AND stage = 'APROVADO'",
+        [p.leadId, job.id]
+      );
+      // Arquivo sem data (estado gravado antes dela existir): fora se já esteve num job aprovado do lead
+      const deJobAnterior = new Set(
+        (
+          await tx.query<{ sha256: string | null }>(
+            `SELECT a.meta->>'sha256' AS sha256 FROM design_assets a JOIN design_jobs j ON j.id = a.job_id
+             WHERE j.lead_id = $1 AND j.id <> $2 AND j.stage = 'APROVADO' AND a.tipo = 'ORIGINAL'`,
+            [p.leadId, job.id]
+          )
+        ).map((r) => r.sha256)
+      );
+      const doPedido = (img: ImagemValida) => {
+        const em = Date.parse(img.recebidoEm ?? "");
+        return Number.isNaN(em) ? !deJobAnterior.has(img.sha256) : !corte || em > corte.getTime();
+      };
+      const imagens = validas.filter((img) => doPedido(img) && !jaTem.has(img.sha256) && jaTem.add(img.sha256));
       const analisavel = imagens.some((i) => ehAnalisavel(i.tipo));
       for (const img of imagens) {
         await salvarAsset(tx, job.id, "ORIGINAL", img);
@@ -175,7 +195,7 @@ export async function mudarEtapaTx(tx: Executor, jobId: string, para: Etapa, ato
   const extra =
     para === "PROCESSANDO_IA"
       ? ", ia_tentativas = 0, ia_status = 'PENDENTE', ia_proxima_tentativa_em = NULL"
-      : para === "AJUSTES"
+      : para === "AJUSTES" || para === "AGUARDANDO_CLIENTE"
         ? ", confirmacao_pedida_em = NULL, confirmacao_versao = NULL"
         : "";
   await tx.query(`UPDATE design_jobs SET stage = $2, updated_at = NOW()${extra} WHERE id = $1`, [jobId, para]);
@@ -266,7 +286,7 @@ export async function anexarMockup(jobId: string, arquivo: { bytes: Buffer; nome
   });
 }
 
-async function enviarImagemAoCliente(jobId: string, versao: number, legenda: string): Promise<void> {
+async function enviarImagemAoCliente(jobId: string, versao: number, legenda: string, chave: string): Promise<void> {
   const a = await one<{ arquivo: string; phone: string }>(
     `SELECT a.arquivo, l.phone FROM design_assets a JOIN design_jobs j ON j.id = a.job_id JOIN leads l ON l.id = j.lead_id
      WHERE a.job_id = $1 AND a.tipo = 'MOCKUP' AND a.versao = $2`,
@@ -274,7 +294,7 @@ async function enviarImagemAoCliente(jobId: string, versao: number, legenda: str
   );
   if (!a) throw new DesignError("Versão do mockup não encontrada.", 404);
   const url = urlAbsoluta(await armazem().urlTemporaria(a.arquivo));
-  const r = await callPonte<{ id: string }>("/enviar-midia", { telefone: a.phone, url, legenda: legenda.slice(0, 1000) });
+  const r = await callPonte<{ id: string }>("/enviar-midia", { telefone: a.phone, url, legenda: legenda.slice(0, 1000), chave });
   if (!r.ok) throw new DesignError(r.error, r.status === 503 ? 503 : 502);
 }
 
@@ -283,7 +303,7 @@ export async function enviarMockup(jobId: string, versao: number, legenda: strin
   if (!atual) throw new DesignError("Job não encontrado.", 404);
   if (!podeTransitar(atual.stage, "AGUARDANDO_CLIENTE")) throw new DesignError("O mockup só sai de Em criação ou Ajustes.");
   // Ponte antes do banco, como a rota /enviar: falhou o envio, nada muda
-  await enviarImagemAoCliente(jobId, versao, legenda);
+  await enviarImagemAoCliente(jobId, versao, legenda, `mockup:${jobId}:${versao}`);
   await transaction(async (tx) => {
     await mudarEtapaTx(tx, jobId, "AGUARDANDO_CLIENTE", atorId);
     const [j] = await tx.query<{ lead_id: string }>("UPDATE design_jobs SET conversa_com_designer = true WHERE id = $1 RETURNING lead_id", [jobId]);
@@ -305,8 +325,19 @@ export async function pedirConfirmacao(jobId: string, atorId: string): Promise<v
   }
   const versao = atual.versao;
   const legenda = LEGENDA_CONFIRMACAO(versao);
-  await enviarImagemAoCliente(jobId, versao, legenda);
+  await enviarImagemAoCliente(jobId, versao, legenda, `confirmacao:${jobId}:${versao}`);
   await transaction(async (tx) => {
+    await tx.query("SELECT id FROM design_jobs WHERE id = $1 FOR UPDATE", [jobId]);
+    const [agora] = await tx.query<{ stage: Etapa; versao: number | null }>(
+      `SELECT j.stage, (SELECT (e.dados->>'versao')::int FROM design_events e
+         WHERE e.job_id = j.id AND e.tipo = 'mockup_enviado' ORDER BY e.created_at DESC LIMIT 1) AS versao
+       FROM design_jobs j WHERE j.id = $1`,
+      [jobId]
+    );
+    // O job pode ter ido para Ajustes ou recebido outra versão enquanto a foto ia
+    if (agora?.stage !== "AGUARDANDO_CLIENTE" || agora.versao !== versao) {
+      throw new DesignError("O job mudou durante o envio. Peça a confirmação de novo.");
+    }
     await tx.query("UPDATE design_jobs SET confirmacao_pedida_em = NOW(), confirmacao_versao = $2, updated_at = NOW() WHERE id = $1", [jobId, versao]);
     await registrarEvento(tx, jobId, atorId, "confirmacao_pedida", { versao, texto: legenda });
   });
@@ -483,7 +514,8 @@ export async function detalharJob(jobId: string) {
       [jobId]
     ),
     query(
-      `SELECT * FROM (SELECT m.id, m.author, u.name AS sent_by_name, m.body, m.sent_at, m.kind FROM messages m
+      `SELECT * FROM (SELECT m.id, m.author, u.name AS sent_by_name, m.body, m.sent_at, m.kind,
+           m.transcription, m.transcription_status, (m.media_key IS NOT NULL) AS has_media FROM messages m
          LEFT JOIN users u ON u.id = m.sent_by WHERE m.lead_id = $1 ORDER BY m.sent_at DESC LIMIT 50) t ORDER BY sent_at`,
       [job.lead_id]
     ),

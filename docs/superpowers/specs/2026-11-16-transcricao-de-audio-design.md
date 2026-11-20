@@ -36,7 +36,7 @@ Fora:
 |---|---|
 | D1 | O player entra nesta fase, e o áudio vai para o `Armazem` (`crm/src/lib/arquivos.ts`) que o Módulo Design cria. |
 | D2 | Modelo `whisper-1`, o mesmo do LembreMe, com `language: 'pt'` e um `prompt` com o vocabulário da loja. Sem benchmark. |
-| D3 | Transcreve só com a IA no atendimento. Com humano, o CRM mostra o player sem texto. |
+| D3 | Transcreve só com a IA no atendimento. Com humano, o CRM mostra o player sem texto. **Revista em 19/11:** transcreve sempre (dentro da cota); com humano o texto vai só ao CRM, não ao agente. |
 | D4 | Falha: 3 tentativas. Depois disso, com a IA no atendimento, a Lia manda uma mensagem fixa pedindo o texto. O erro vai só para o log. O CRM mostra o player com o aviso "transcrição falhou". |
 | D5 | A ponte transcreve, o CRM guarda (abordagem 1). A Lia nunca espera o CRM. |
 | D6 | A Lia recebe texto puro, sem marcação. O prompt dela não muda. |

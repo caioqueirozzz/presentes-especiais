@@ -68,7 +68,7 @@ export const tools: ToolDefinition[] = [
   {
     name: "preparar_orcamento",
     description:
-      "Valida os itens (cor, estoque, quantidade mínima) e calcula a estimativa com o preço exato do site para a equipe emitir o orçamento. Cada item é um subproduto (produto + cor): o subproduto_id da cor pedida vem de subprodutos em buscar_produtos, de subprodutos_ativos em detalhar_produto ou de produtos_detalhados no estado da conversa; nunca use o id do produto e nunca invente. O cliente vê o resumo e confirma; depois, transferir_humano com motivo orcamento_para_emitir leva a estimativa à equipe.",
+      "Valida os itens (cor, estoque, quantidade mínima) e calcula a estimativa com o preço exato do site para a equipe emitir o orçamento. Cada item é um subproduto (produto + cor): o subproduto_id da cor pedida vem de subprodutos em buscar_produtos, de subprodutos_ativos em detalhar_produto ou de produtos_detalhados no estado da conversa; nunca use o id do produto e nunca invente. Mande também a cor de cada item em cor, como aparece na lista. O cliente vê o resumo e confirma; depois, transferir_humano com motivo orcamento_para_emitir leva a estimativa à equipe.",
     inputSchema: schemaDaFerramenta(prepararOrcamentoSchema),
     schema: prepararOrcamentoSchema,
     handler: prepararOrcamentoHandler as ToolDefinition["handler"],

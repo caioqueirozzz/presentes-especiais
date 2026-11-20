@@ -95,7 +95,68 @@ describe("gatilhoArte e ligarConversaComDesigner", () => {
   });
 });
 
+describe("job novo depois de um fechado (teste de 19/11: as canecas do pedido anterior voltaram)", () => {
+  const antes = () => new Date(Date.now() - 3_600_000).toISOString();
+  const depois = () => new Date(Date.now() + 60_000).toISOString();
+  const originais = async (jobId: string) =>
+    (await query<{ nome: string }>("SELECT meta->>'nome' AS nome FROM design_assets WHERE job_id = $1 AND tipo = 'ORIGINAL' ORDER BY created_at", [jobId])).map((r) => r.nome);
+
+  async function leadComJobFechado() {
+    const lead = await criarLead();
+    const { jobId } = await abrirOuAnexar({ leadId: lead, origem: "VENDEDOR", imagens: [{ ...PNG, recebidoEm: antes() }] });
+    await query("UPDATE design_jobs SET stage = 'APROVADO', updated_at = NOW() WHERE id = $1", [jobId]);
+    return lead;
+  }
+
+  it("arquivo que chegou antes do último job fechado não entra; o que chegou depois entra", async () => {
+    const lead = await leadComJobFechado();
+    const { jobId } = await abrirOuAnexar({ leadId: lead, origem: "VENDEDOR", imagens: [{ ...PNG, recebidoEm: antes() }, { ...SVG, recebidoEm: depois() }] });
+    expect(await originais(jobId)).toEqual(["logo.svg"]);
+  });
+
+  it("a mesma logo mandada de novo depois do job fechado entra no job novo", async () => {
+    const lead = await leadComJobFechado();
+    const { jobId } = await abrirOuAnexar({ leadId: lead, origem: "VENDEDOR", imagens: [{ ...PNG, recebidoEm: depois() }] });
+    expect(await originais(jobId)).toEqual(["ref.png"]);
+  });
+
+  it("cancelar e reabrir o mesmo pedido mantém os arquivos, com e sem data (teste de 19/11: o job novo veio vazio)", async () => {
+    const lead = await leadComJobFechado();
+    const { jobId: cancelado } = await abrirOuAnexar({ leadId: lead, origem: "VENDEDOR", imagens: [{ ...SVG, recebidoEm: depois() }] });
+    await query("UPDATE design_jobs SET stage = 'CANCELADO', updated_at = NOW() + interval '5 minutes' WHERE id = $1", [cancelado]);
+    const { jobId } = await abrirOuAnexar({ leadId: lead, origem: "VENDEDOR", imagens: [{ ...SVG, recebidoEm: depois() }] });
+    expect(await originais(jobId)).toEqual(["logo.svg"]);
+    const semData = await abrirOuAnexar({ leadId: await leadComCancelado(), origem: "VENDEDOR", imagens: [SVG] });
+    expect(await originais(semData.jobId)).toEqual(["logo.svg"]);
+  });
+
+  async function leadComCancelado() {
+    const lead = await criarLead();
+    const { jobId } = await abrirOuAnexar({ leadId: lead, origem: "VENDEDOR", imagens: [SVG] });
+    await query("UPDATE design_jobs SET stage = 'CANCELADO', updated_at = NOW() WHERE id = $1", [jobId]);
+    return lead;
+  }
+
+  it("arquivo sem data (estado antigo) que já esteve num job anterior fica de fora", async () => {
+    const lead = await leadComJobFechado();
+    const { jobId } = await abrirOuAnexar({ leadId: lead, origem: "VENDEDOR", imagens: [PNG, SVG] });
+    expect(await originais(jobId)).toEqual(["logo.svg"]);
+  });
+});
+
 describe("detalharJob", () => {
+  it("mensagem de áudio guardado vem com has_media e a transcrição", async () => {
+    const lead = await criarLead();
+    const { jobId } = await abrirOuAnexar({ leadId: lead, origem: "VENDEDOR", imagens: [] });
+    await query(
+      `INSERT INTO messages (lead_id, external_id, author, body, sent_at, source, kind, media_key, media_mime, transcription, transcription_status)
+       VALUES ($1, 'wa-a', 'CLIENTE', '🎤 Áudio', NOW(), 'WHATSAPP', 'audio', $2, 'audio/ogg', 'quero canecas', 'OK')`,
+      [lead, `audios/${lead}/x.ogg`]
+    );
+    const m = (await detalharJob(jobId)).mensagens.find((x) => x.kind === "audio")!;
+    expect(m).toMatchObject({ has_media: true, transcription: "quero canecas", transcription_status: "OK" });
+  });
+
   it("PNG sai com url assinada; SVG só para download", async () => {
     const lead = await criarLead();
     const { jobId } = await abrirOuAnexar({ leadId: lead, origem: "VENDEDOR", imagens: [PNG, SVG] });

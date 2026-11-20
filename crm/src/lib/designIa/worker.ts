@@ -41,12 +41,12 @@ async function comGuarda(job: JobDaFila, sets: string, params: unknown[], depois
   });
 }
 
-/** Últimas 20 mensagens de texto depois do último job fechado do lead: o pedido anterior não entra no briefing. */
+/** Últimas 20 mensagens de texto depois do último job aprovado do lead: o pedido anterior não entra no briefing; cancelado não fecha pedido. */
 async function conversaDoLead(leadId: string, jobId: string): Promise<string> {
   const msgs = await query<{ author: string; body: string }>(
     `SELECT author, body FROM messages WHERE lead_id = $1 AND kind = 'texto'
        AND sent_at > COALESCE((SELECT MAX(updated_at) FROM design_jobs
-                               WHERE lead_id = $1 AND id <> $2 AND stage IN ('APROVADO','CANCELADO')), '-infinity')
+                               WHERE lead_id = $1 AND id <> $2 AND stage = 'APROVADO'), '-infinity')
      ORDER BY sent_at DESC LIMIT 20`,
     [leadId, jobId]
   );

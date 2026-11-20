@@ -30,11 +30,23 @@ export function erroDeDesign(err: unknown, contexto: string) {
 }
 
 /** Arquivos de um multipart, como o design.ts recebe. */
-export async function arquivosDoForm(form: FormData, campo: string, max = 10): Promise<{ bytes: Buffer; nome: string }[]> {
-  // A ponte manda os arquivos da conversa do mais antigo ao mais recente: passando do limite, ficam os últimos
+export async function arquivosDoForm(
+  form: FormData,
+  campo: string,
+  max = 10
+): Promise<{ bytes: Buffer; nome: string; recebidoEm?: string }[]> {
+  // A ponte manda os arquivos da conversa do mais antigo ao mais recente, cada um com a data ao lado: passando do limite, ficam os últimos
+  const datas = form.getAll(`${campo}_recebida_em`);
   const files = form
     .getAll(campo)
-    .filter((f): f is File => typeof f === "object" && f !== null && "arrayBuffer" in f)
+    .map((f, i) => ({ f, em: datas[i] as FormDataEntryValue | undefined }))
+    .filter((x): x is { f: File; em: FormDataEntryValue | undefined } => typeof x.f === "object" && x.f !== null && "arrayBuffer" in x.f)
     .slice(-max);
-  return Promise.all(files.map(async (f) => ({ bytes: Buffer.from(await f.arrayBuffer()), nome: (f.name || "arquivo").slice(0, 120) })));
+  return Promise.all(
+    files.map(async ({ f, em }) => ({
+      bytes: Buffer.from(await f.arrayBuffer()),
+      nome: (f.name || "arquivo").slice(0, 120),
+      ...(typeof em === "string" && em ? { recebidoEm: em.slice(0, 40) } : {}),
+    }))
+  );
 }

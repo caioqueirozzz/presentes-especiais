@@ -137,13 +137,30 @@ describe("worker do kit de partida", () => {
     expect(j!.ficha).toEqual({});
   });
 
-  it("a conversa do briefing começa depois do último job fechado do lead", async () => {
+  it("job cancelado não corta o briefing: cancelar e reabrir mantém a conversa do pedido", async () => {
+    await criarUsuario({ role: "DESIGNER" });
+    const leadId = await criarLead();
+    await query("INSERT INTO messages (lead_id, external_id, author, body, sent_at) VALUES ($1, 'a', 'CLIENTE', 'quero 50 guarda-chuvas', NOW() - interval '2 hours')", [leadId]);
+    const antigo = await abrirOuAnexar({ leadId, origem: "VENDEDOR", imagens: [] });
+    await mudarEtapa(antigo.jobId, "CANCELADO", null);
+    await query("UPDATE design_jobs SET updated_at = NOW() - interval '1 hour' WHERE id = $1", [antigo.jobId]);
+    await abrirOuAnexar({ leadId, origem: "VENDEDOR", imagens: [{ bytes: png, nome: "logo.png" }] });
+
+    let texto = "";
+    const fetchFn = (async (_url: string, init: RequestInit) => {
+      texto = JSON.parse(String(init.body)).messages[1].content[0].text;
+      return ok()("");
+    }) as unknown as typeof fetch;
+    expect(await processarJob((await pegarProximo())!, { fetchFn })).toBe("ok");
+    expect(texto).toContain("quero 50 guarda-chuvas");
+  });
+
+  it("a conversa do briefing começa depois do último job aprovado do lead", async () => {
     await criarUsuario({ role: "DESIGNER" });
     const leadId = await criarLead();
     await query("INSERT INTO messages (lead_id, external_id, author, body, sent_at) VALUES ($1, 'a', 'CLIENTE', 'pedido antigo de canecas', NOW() - interval '2 hours')", [leadId]);
     const antigo = await abrirOuAnexar({ leadId, origem: "VENDEDOR", imagens: [] });
-    await mudarEtapa(antigo.jobId, "CANCELADO", null);
-    await query("UPDATE design_jobs SET updated_at = NOW() - interval '1 hour' WHERE id = $1", [antigo.jobId]);
+    await query("UPDATE design_jobs SET stage = 'APROVADO', updated_at = NOW() - interval '1 hour' WHERE id = $1", [antigo.jobId]);
     await query("INSERT INTO messages (lead_id, external_id, author, body, sent_at) VALUES ($1, 'b', 'CLIENTE', 'agora quero 30 bonés', NOW() - interval '10 minutes')", [leadId]);
     await abrirOuAnexar({ leadId, origem: "VENDEDOR", imagens: [{ bytes: png, nome: "bone.png" }] });
 

@@ -55,7 +55,7 @@ const conversaSchema = z
         subprodutoParaProduto: z.record(z.string()),
         artes: z.array(z.object({ ref: z.string(), arquivo: z.string() }).passthrough()),
         arquivosRecebidos: z
-          .array(z.object({ nome: z.string(), caminho: z.string(), mime: z.string(), bytes: z.number() }))
+          .array(z.object({ nome: z.string(), caminho: z.string(), mime: z.string(), bytes: z.number(), recebidoEm: z.string().optional() }))
           .optional(),
         falhasConsecutivas: z.number(),
         historico: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string(), timestamp: z.string() })),

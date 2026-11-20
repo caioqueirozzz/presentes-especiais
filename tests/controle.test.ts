@@ -79,6 +79,25 @@ describe("/enviar-midia", () => {
     estado = "RECONECTANDO";
     expect((await post("/enviar-midia", valido)).status).toBe(409);
   });
+  it("mesma chave em 2 min: envia uma vez e devolve o mesmo id", async () => {
+    const corpo = { ...valido, chave: "mockup:job-a:1" };
+    const [a, b] = await Promise.all([post("/enviar-midia", corpo), post("/enviar-midia", corpo)]);
+    expect(await a.json()).toEqual({ id: "id-midia" });
+    expect(await b.json()).toEqual({ id: "id-midia" });
+    expect(canal.enviarImagemParaTelefone).toHaveBeenCalledTimes(1);
+  });
+  it("mesma chave com legenda trocada envia de novo", async () => {
+    await post("/enviar-midia", { ...valido, chave: "mockup:job-c:1", legenda: "legenda errada" });
+    await post("/enviar-midia", { ...valido, chave: "mockup:job-c:1", legenda: "legenda certa" });
+    expect(canal.enviarImagemParaTelefone).toHaveBeenCalledTimes(2);
+  });
+  it("envio que falhou libera a chave para a nova tentativa", async () => {
+    const corpo = { ...valido, chave: "mockup:job-b:1" };
+    canal.enviarImagemParaTelefone.mockRejectedValueOnce(new Error("caiu"));
+    expect((await post("/enviar-midia", corpo)).status).toBeGreaterThanOrEqual(500);
+    expect((await post("/enviar-midia", corpo)).status).toBe(200);
+    expect(canal.enviarImagemParaTelefone).toHaveBeenCalledTimes(2);
+  });
   it.each(["https://cdn.exemplo.com/a.png", "http://127.0.0.1:3200/api/design/arquivo?chave=x", "http://localhost:3200/x"])(
     "válido (%s) → 200, envio como atendente",
     async (url) => {

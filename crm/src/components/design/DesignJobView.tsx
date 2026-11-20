@@ -40,7 +40,7 @@ interface Detalhe {
     conversa_com_designer: boolean;
   };
   assets: AssetDetalhe[];
-  mensagens: Pick<Message, "id" | "author" | "body" | "sent_at">[];
+  mensagens: Pick<Message, "id" | "author" | "body" | "sent_at" | "kind" | "transcription" | "transcription_status" | "has_media">[];
 }
 
 const ROTULO_ACAO: Record<Acao, { texto: string; icone: string; variante?: "outline" | "danger" }> = {
@@ -73,7 +73,7 @@ function Original({ asset }: { asset: AssetDetalhe }) {
 
 export function DesignJobView({ id }: { id: string }) {
   const { me, base, isAdmin } = usePortal();
-  const { data, error, reload } = useApi<Detalhe>(`/api/design/${id}`, 20_000);
+  const { data, error, reload } = useApi<Detalhe>(`/api/design/${id}`, 4_000);
   const [busy, setBusy] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [legenda, setLegenda] = useState("");
@@ -238,7 +238,16 @@ export function DesignJobView({ id }: { id: string }) {
                 key={m.id}
                 className={`rounded-xl px-3 py-2 text-[13px] ${m.author === "CLIENTE" ? "bg-on-surface/[0.05]" : "ml-6 bg-primary/10"}`}
               >
-                {m.body}
+                {m.kind === "audio" && m.has_media ? (
+                  <>
+                    <audio controls preload="none" aria-label="Áudio do cliente" src={`/api/leads/${job.lead_id}/messages/${m.id}/audio`} className="max-w-full" />
+                    {m.transcription_status === "OK" && m.transcription && (
+                      <span className="mt-1 block whitespace-pre-wrap break-words italic opacity-80">Transcrição: {m.transcription}</span>
+                    )}
+                  </>
+                ) : (
+                  m.body
+                )}
               </p>
             ))}
           </div>

@@ -42,6 +42,7 @@ async function noCrm(p: PedidoDesign): Promise<{ jobId: string; imagens: number 
     const bytes = await readFile(a.caminho).catch(() => null);
     if (!bytes) continue;
     form.append("imagem", new Blob([bytes], { type: a.mime }), a.nome);
+    form.append("imagem_recebida_em", a.recebidoEm ?? "");
     imagens++;
   }
   const res = await fetch(`${config.crm.url}/api/integracao/design`, {
