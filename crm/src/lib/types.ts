@@ -2,7 +2,12 @@
  * Tipos e réguas compartilhados entre servidor e navegador (sem imports de servidor).
  */
 
-export type Role = "ADMIN" | "COLABORADOR";
+export type Role = "ADMIN" | "COLABORADOR" | "DESIGNER";
+
+/** Página inicial de cada papel */
+export function homeFor(role: Role): string {
+  return role === "ADMIN" ? "/admin/inicio" : role === "DESIGNER" ? "/app/design" : "/app/inicio";
+}
 export type QualificationStatus = "NONE" | "IN_PROGRESS" | "QUALIFIED" | "DISQUALIFIED";
 export type Stage = "NOVO" | "ATENDIMENTO" | "ORCAMENTO" | "ARTE" | "NEGOCIACAO" | "GANHO" | "PERDIDO";
 export type LeadTemperature = "quente" | "morno" | "frio";
@@ -87,6 +92,10 @@ export interface Message {
   sent_at: string;
   /** texto | midia | audio | nao_suportada */
   kind?: string;
+  /** Só no áudio do cliente (Fase 4). A chave do arquivo não vai ao navegador. */
+  transcription?: string | null;
+  transcription_status?: "OK" | "FALHOU" | "NAO_TRANSCRITO" | null;
+  has_media?: boolean;
 }
 
 export interface LeadEvent {

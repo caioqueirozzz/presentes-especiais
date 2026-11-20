@@ -10,14 +10,25 @@
     "status": true,
     "featured": true,
     "stock": 500,
-    "price": 18.90,
+    "price": 18.9,
     "min_quantity": 25,
-    "categories": [{ "id": "cat-01", "name": "Canecas" }],
+    "categories": [
+      {
+        "id": "cat-01",
+        "name": "Canecas"
+      }
+    ],
     "images": [
-      { "url": "https://cdn.brindeme.com/caneca-porcelana-branca.jpg", "alt": "Caneca porcelana branca" }
+      {
+        "url": "https://cdn.brindeme.com/caneca-porcelana-branca.jpg",
+        "alt": "Caneca porcelana branca"
+      }
     ],
     "customizations": [
-      { "type": "impressao", "description": "Logo ou arte em até 2 cores" }
+      {
+        "type": "impressao",
+        "description": "Logo ou arte em até 2 cores"
+      }
     ],
     "subproducts": [
       {
@@ -27,9 +38,21 @@
         "color": "Branco",
         "stock": 300,
         "prices": [
-          { "min": 25, "max": 99, "price": 18.90 },
-          { "min": 100, "max": 499, "price": 15.40 },
-          { "min": 500, "max": 9999, "price": 12.80 }
+          {
+            "min": 25,
+            "max": 99,
+            "price": 18.9
+          },
+          {
+            "min": 100,
+            "max": 499,
+            "price": 15.4
+          },
+          {
+            "min": 500,
+            "max": 9999,
+            "price": 12.8
+          }
         ]
       },
       {
@@ -39,13 +62,31 @@
         "color": "Preto",
         "stock": 200,
         "prices": [
-          { "min": 25, "max": 99, "price": 19.90 },
-          { "min": 100, "max": 499, "price": 16.40 },
-          { "min": 500, "max": 9999, "price": 13.80 }
+          {
+            "min": 25,
+            "max": 99,
+            "price": 19.9
+          },
+          {
+            "min": 100,
+            "max": 499,
+            "price": 16.4
+          },
+          {
+            "min": 500,
+            "max": 9999,
+            "price": 13.8
+          }
         ]
       }
     ],
-    "tags_ocasiao": ["natal", "corporativo", "dia-dos-professores", "aniversario", "formatura"]
+    "tags_ocasiao": [
+      "natal",
+      "corporativo",
+      "dia-dos-professores",
+      "aniversario",
+      "formatura"
+    ]
   },
   {
     "id": "prod-002",
@@ -58,14 +99,25 @@
     "status": true,
     "featured": true,
     "stock": 400,
-    "price": 32.50,
+    "price": 32.5,
     "min_quantity": 50,
-    "categories": [{ "id": "cat-02", "name": "Garrafas e Squeezes" }],
+    "categories": [
+      {
+        "id": "cat-02",
+        "name": "Garrafas e Squeezes"
+      }
+    ],
     "images": [
-      { "url": "https://cdn.brindeme.com/squeeze-aluminio-prata.jpg", "alt": "Squeeze de alumínio prata" }
+      {
+        "url": "https://cdn.brindeme.com/squeeze-aluminio-prata.jpg",
+        "alt": "Squeeze de alumínio prata"
+      }
     ],
     "customizations": [
-      { "type": "gravacao-laser", "description": "Gravação a laser do logo" }
+      {
+        "type": "gravacao-laser",
+        "description": "Gravação a laser do logo"
+      }
     ],
     "subproducts": [
       {
@@ -75,9 +127,21 @@
         "color": "Prata",
         "stock": 250,
         "prices": [
-          { "min": 50, "max": 99, "price": 32.50 },
-          { "min": 100, "max": 499, "price": 28.00 },
-          { "min": 500, "max": 9999, "price": 24.50 }
+          {
+            "min": 50,
+            "max": 99,
+            "price": 32.5
+          },
+          {
+            "min": 100,
+            "max": 499,
+            "price": 28
+          },
+          {
+            "min": 500,
+            "max": 9999,
+            "price": 24.5
+          }
         ]
       },
       {
@@ -87,13 +151,30 @@
         "color": "Azul",
         "stock": 150,
         "prices": [
-          { "min": 50, "max": 99, "price": 32.50 },
-          { "min": 100, "max": 499, "price": 28.00 },
-          { "min": 500, "max": 9999, "price": 24.50 }
+          {
+            "min": 50,
+            "max": 99,
+            "price": 32.5
+          },
+          {
+            "min": 100,
+            "max": 499,
+            "price": 28
+          },
+          {
+            "min": 500,
+            "max": 9999,
+            "price": 24.5
+          }
         ]
       }
     ],
-    "tags_ocasiao": ["corporativo", "esportivo", "dia-das-maes", "dia-dos-pais"]
+    "tags_ocasiao": [
+      "corporativo",
+      "esportivo",
+      "dia-das-maes",
+      "dia-dos-pais"
+    ]
   },
   {
     "id": "prod-003",
@@ -106,14 +187,25 @@
     "status": true,
     "featured": false,
     "stock": 200,
-    "price": 58.00,
+    "price": 58,
     "min_quantity": 25,
-    "categories": [{ "id": "cat-02", "name": "Garrafas e Squeezes" }],
+    "categories": [
+      {
+        "id": "cat-02",
+        "name": "Garrafas e Squeezes"
+      }
+    ],
     "images": [
-      { "url": "https://cdn.brindeme.com/garrafa-termica-preta.jpg", "alt": "Garrafa térmica preta" }
+      {
+        "url": "https://cdn.brindeme.com/garrafa-termica-preta.jpg",
+        "alt": "Garrafa térmica preta"
+      }
     ],
     "customizations": [
-      { "type": "impressao", "description": "Silk-screen ou adesivo resinado" }
+      {
+        "type": "impressao",
+        "description": "Silk-screen ou adesivo resinado"
+      }
     ],
     "subproducts": [
       {
@@ -123,9 +215,21 @@
         "color": "Preta",
         "stock": 120,
         "prices": [
-          { "min": 25, "max": 49, "price": 58.00 },
-          { "min": 50, "max": 199, "price": 52.00 },
-          { "min": 200, "max": 9999, "price": 46.00 }
+          {
+            "min": 25,
+            "max": 49,
+            "price": 58
+          },
+          {
+            "min": 50,
+            "max": 199,
+            "price": 52
+          },
+          {
+            "min": 200,
+            "max": 9999,
+            "price": 46
+          }
         ]
       },
       {
@@ -135,13 +239,30 @@
         "color": "Branca",
         "stock": 80,
         "prices": [
-          { "min": 25, "max": 49, "price": 58.00 },
-          { "min": 50, "max": 199, "price": 52.00 },
-          { "min": 200, "max": 9999, "price": 46.00 }
+          {
+            "min": 25,
+            "max": 49,
+            "price": 58
+          },
+          {
+            "min": 50,
+            "max": 199,
+            "price": 52
+          },
+          {
+            "min": 200,
+            "max": 9999,
+            "price": 46
+          }
         ]
       }
     ],
-    "tags_ocasiao": ["corporativo", "natal", "dia-dos-pais", "dia-das-maes"]
+    "tags_ocasiao": [
+      "corporativo",
+      "natal",
+      "dia-dos-pais",
+      "dia-das-maes"
+    ]
   },
   {
     "id": "prod-004",
@@ -154,14 +275,25 @@
     "status": true,
     "featured": true,
     "stock": 600,
-    "price": 22.00,
+    "price": 22,
     "min_quantity": 50,
-    "categories": [{ "id": "cat-03", "name": "Papelaria" }],
+    "categories": [
+      {
+        "id": "cat-03",
+        "name": "Papelaria"
+      }
+    ],
     "images": [
-      { "url": "https://cdn.brindeme.com/caderno-a5-azul.jpg", "alt": "Caderno A5 azul" }
+      {
+        "url": "https://cdn.brindeme.com/caderno-a5-azul.jpg",
+        "alt": "Caderno A5 azul"
+      }
     ],
     "customizations": [
-      { "type": "impressao-capa", "description": "Impressão full-color na capa" }
+      {
+        "type": "impressao-capa",
+        "description": "Impressão full-color na capa"
+      }
     ],
     "subproducts": [
       {
@@ -171,9 +303,21 @@
         "color": "Azul",
         "stock": 300,
         "prices": [
-          { "min": 50, "max": 99, "price": 22.00 },
-          { "min": 100, "max": 499, "price": 18.50 },
-          { "min": 500, "max": 9999, "price": 15.00 }
+          {
+            "min": 50,
+            "max": 99,
+            "price": 22
+          },
+          {
+            "min": 100,
+            "max": 499,
+            "price": 18.5
+          },
+          {
+            "min": 500,
+            "max": 9999,
+            "price": 15
+          }
         ]
       },
       {
@@ -183,13 +327,30 @@
         "color": "Vermelho",
         "stock": 300,
         "prices": [
-          { "min": 50, "max": 99, "price": 22.00 },
-          { "min": 100, "max": 499, "price": 18.50 },
-          { "min": 500, "max": 9999, "price": 15.00 }
+          {
+            "min": 50,
+            "max": 99,
+            "price": 22
+          },
+          {
+            "min": 100,
+            "max": 499,
+            "price": 18.5
+          },
+          {
+            "min": 500,
+            "max": 9999,
+            "price": 15
+          }
         ]
       }
     ],
-    "tags_ocasiao": ["corporativo", "dia-dos-professores", "formatura", "volta-as-aulas"]
+    "tags_ocasiao": [
+      "corporativo",
+      "dia-dos-professores",
+      "formatura",
+      "volta-as-aulas"
+    ]
   },
   {
     "id": "prod-005",
@@ -202,14 +363,25 @@
     "status": true,
     "featured": false,
     "stock": 800,
-    "price": 14.50,
+    "price": 14.5,
     "min_quantity": 100,
-    "categories": [{ "id": "cat-04", "name": "Sacolas" }],
+    "categories": [
+      {
+        "id": "cat-04",
+        "name": "Sacolas"
+      }
+    ],
     "images": [
-      { "url": "https://cdn.brindeme.com/ecobag-natural.jpg", "alt": "Ecobag natural algodão" }
+      {
+        "url": "https://cdn.brindeme.com/ecobag-natural.jpg",
+        "alt": "Ecobag natural algodão"
+      }
     ],
     "customizations": [
-      { "type": "serigrafia", "description": "Impressão serigrafia até 4 cores" }
+      {
+        "type": "serigrafia",
+        "description": "Impressão serigrafia até 4 cores"
+      }
     ],
     "subproducts": [
       {
@@ -219,9 +391,21 @@
         "color": "Natural",
         "stock": 500,
         "prices": [
-          { "min": 100, "max": 299, "price": 14.50 },
-          { "min": 300, "max": 999, "price": 12.00 },
-          { "min": 1000, "max": 9999, "price": 9.80 }
+          {
+            "min": 100,
+            "max": 299,
+            "price": 14.5
+          },
+          {
+            "min": 300,
+            "max": 999,
+            "price": 12
+          },
+          {
+            "min": 1000,
+            "max": 9999,
+            "price": 9.8
+          }
         ]
       },
       {
@@ -231,13 +415,31 @@
         "color": "Preto",
         "stock": 300,
         "prices": [
-          { "min": 100, "max": 299, "price": 15.50 },
-          { "min": 300, "max": 999, "price": 13.00 },
-          { "min": 1000, "max": 9999, "price": 10.80 }
+          {
+            "min": 100,
+            "max": 299,
+            "price": 15.5
+          },
+          {
+            "min": 300,
+            "max": 999,
+            "price": 13
+          },
+          {
+            "min": 1000,
+            "max": 9999,
+            "price": 10.8
+          }
         ]
       }
     ],
-    "tags_ocasiao": ["corporativo", "natal", "sustentabilidade", "eventos", "dia-das-maes"]
+    "tags_ocasiao": [
+      "corporativo",
+      "natal",
+      "sustentabilidade",
+      "eventos",
+      "dia-das-maes"
+    ]
   },
   {
     "id": "prod-006",
@@ -250,14 +452,25 @@
     "status": true,
     "featured": false,
     "stock": 2000,
-    "price": 8.90,
+    "price": 8.9,
     "min_quantity": 100,
-    "categories": [{ "id": "cat-05", "name": "Chaveiros" }],
+    "categories": [
+      {
+        "id": "cat-05",
+        "name": "Chaveiros"
+      }
+    ],
     "images": [
-      { "url": "https://cdn.brindeme.com/chaveiro-acrilico-cristal.jpg", "alt": "Chaveiro acrílico cristal" }
+      {
+        "url": "https://cdn.brindeme.com/chaveiro-acrilico-cristal.jpg",
+        "alt": "Chaveiro acrílico cristal"
+      }
     ],
     "customizations": [
-      { "type": "impressao-uv", "description": "Impressão UV full-color em um lado" }
+      {
+        "type": "impressao-uv",
+        "description": "Impressão UV full-color em um lado"
+      }
     ],
     "subproducts": [
       {
@@ -267,9 +480,21 @@
         "color": "Cristal",
         "stock": 1200,
         "prices": [
-          { "min": 100, "max": 299, "price": 8.90 },
-          { "min": 300, "max": 999, "price": 7.20 },
-          { "min": 1000, "max": 9999, "price": 5.90 }
+          {
+            "min": 100,
+            "max": 299,
+            "price": 8.9
+          },
+          {
+            "min": 300,
+            "max": 999,
+            "price": 7.2
+          },
+          {
+            "min": 1000,
+            "max": 9999,
+            "price": 5.9
+          }
         ]
       },
       {
@@ -279,13 +504,31 @@
         "color": "Colorido",
         "stock": 0,
         "prices": [
-          { "min": 100, "max": 299, "price": 9.50 },
-          { "min": 300, "max": 999, "price": 7.80 },
-          { "min": 1000, "max": 9999, "price": 6.40 }
+          {
+            "min": 100,
+            "max": 299,
+            "price": 9.5
+          },
+          {
+            "min": 300,
+            "max": 999,
+            "price": 7.8
+          },
+          {
+            "min": 1000,
+            "max": 9999,
+            "price": 6.4
+          }
         ]
       }
     ],
-    "tags_ocasiao": ["natal", "eventos", "dia-dos-professores", "formatura", "aniversario"]
+    "tags_ocasiao": [
+      "natal",
+      "eventos",
+      "dia-dos-professores",
+      "formatura",
+      "aniversario"
+    ]
   },
   {
     "id": "prod-007",
@@ -298,14 +541,29 @@
     "status": true,
     "featured": true,
     "stock": 150,
-    "price": 42.00,
+    "price": 42,
     "min_quantity": 10,
-    "categories": [{ "id": "cat-03", "name": "Papelaria" }, { "id": "cat-06", "name": "Kits" }],
+    "categories": [
+      {
+        "id": "cat-03",
+        "name": "Papelaria"
+      },
+      {
+        "id": "cat-06",
+        "name": "Kits"
+      }
+    ],
     "images": [
-      { "url": "https://cdn.brindeme.com/kit-escritorio-preto.jpg", "alt": "Kit escritório preto" }
+      {
+        "url": "https://cdn.brindeme.com/kit-escritorio-preto.jpg",
+        "alt": "Kit escritório preto"
+      }
     ],
     "customizations": [
-      { "type": "impressao", "description": "Logo na caneta, bloco e porta-lápis" }
+      {
+        "type": "impressao",
+        "description": "Logo na caneta, bloco e porta-lápis"
+      }
     ],
     "subproducts": [
       {
@@ -315,9 +573,21 @@
         "color": "Preto",
         "stock": 100,
         "prices": [
-          { "min": 10, "max": 24, "price": 42.00 },
-          { "min": 25, "max": 99, "price": 38.50 },
-          { "min": 100, "max": 9999, "price": 34.00 }
+          {
+            "min": 10,
+            "max": 24,
+            "price": 42
+          },
+          {
+            "min": 25,
+            "max": 99,
+            "price": 38.5
+          },
+          {
+            "min": 100,
+            "max": 9999,
+            "price": 34
+          }
         ]
       },
       {
@@ -327,13 +597,31 @@
         "color": "Azul Marinho",
         "stock": 50,
         "prices": [
-          { "min": 10, "max": 24, "price": 42.00 },
-          { "min": 25, "max": 99, "price": 38.50 },
-          { "min": 100, "max": 9999, "price": 34.00 }
+          {
+            "min": 10,
+            "max": 24,
+            "price": 42
+          },
+          {
+            "min": 25,
+            "max": 99,
+            "price": 38.5
+          },
+          {
+            "min": 100,
+            "max": 9999,
+            "price": 34
+          }
         ]
       }
     ],
-    "tags_ocasiao": ["corporativo", "natal", "dia-dos-professores", "formatura", "executivo"]
+    "tags_ocasiao": [
+      "corporativo",
+      "natal",
+      "dia-dos-professores",
+      "formatura",
+      "executivo"
+    ]
   },
   {
     "id": "prod-008",
@@ -346,14 +634,25 @@
     "status": false,
     "featured": false,
     "stock": 0,
-    "price": 35.00,
+    "price": 35,
     "min_quantity": 25,
-    "categories": [{ "id": "cat-07", "name": "Vestuário" }],
+    "categories": [
+      {
+        "id": "cat-07",
+        "name": "Vestuário"
+      }
+    ],
     "images": [
-      { "url": "https://cdn.brindeme.com/camiseta-branca.jpg", "alt": "Camiseta branca" }
+      {
+        "url": "https://cdn.brindeme.com/camiseta-branca.jpg",
+        "alt": "Camiseta branca"
+      }
     ],
     "customizations": [
-      { "type": "silk-screen", "description": "Silk-screen frente e/ou costas" }
+      {
+        "type": "silk-screen",
+        "description": "Silk-screen frente e/ou costas"
+      }
     ],
     "subproducts": [
       {
@@ -363,11 +662,377 @@
         "color": "Branca",
         "stock": 0,
         "prices": [
-          { "min": 25, "max": 99, "price": 35.00 },
-          { "min": 100, "max": 9999, "price": 28.00 }
+          {
+            "min": 25,
+            "max": 99,
+            "price": 35
+          },
+          {
+            "min": 100,
+            "max": 9999,
+            "price": 28
+          }
         ]
       }
     ],
-    "tags_ocasiao": ["eventos", "corporativo"]
+    "tags_ocasiao": [
+      "eventos",
+      "corporativo"
+    ]
+  },
+  {
+    "id": "prod-009",
+    "slug": "camisa-dry-fit-personalizada",
+    "code": "CAM-DRY-001",
+    "name": "Camisa Dry Fit Personalizada",
+    "sku": "CAM-DRY-001",
+    "description": "Camisa dry fit em poliamida, secagem rápida, personalizada em silk ou sublimação. Ideal para corridas, equipes e eventos esportivos.",
+    "tech_description": "100% poliamida. Sublimação total ou silk até 4 cores. P ao GG.",
+    "status": true,
+    "featured": false,
+    "stock": 1400,
+    "price": 29.9,
+    "min_quantity": 10,
+    "categories": [
+      {
+        "id": "cat-07",
+        "name": "Vestuário"
+      }
+    ],
+    "images": [
+      {
+        "url": "https://cdn.brindeme.com/camisa-dry-fit-personalizada.jpg",
+        "alt": "Camisa Dry Fit Personalizada"
+      }
+    ],
+    "customizations": [
+      {
+        "type": "sublimação",
+        "description": "sublimação"
+      }
+    ],
+    "subproducts": [
+      {
+        "id": "sub-009-azul",
+        "sku": "CAM-DRY-001-ZUL",
+        "status": true,
+        "color": "Azul royal",
+        "stock": 800,
+        "prices": [
+          {
+            "min": 10,
+            "max": 99,
+            "price": 29.9
+          },
+          {
+            "min": 100,
+            "max": 9999,
+            "price": 24.5
+          }
+        ]
+      },
+      {
+        "id": "sub-009-preta",
+        "sku": "CAM-DRY-001-ETA",
+        "status": true,
+        "color": "Preta",
+        "stock": 600,
+        "prices": [
+          {
+            "min": 10,
+            "max": 99,
+            "price": 29.9
+          },
+          {
+            "min": 100,
+            "max": 9999,
+            "price": 24.5
+          }
+        ]
+      }
+    ],
+    "tags_ocasiao": [
+      "corporativo"
+    ]
+  },
+  {
+    "id": "prod-010",
+    "slug": "porta-latas-camisa-personalizado",
+    "code": "PLT-CAM-001",
+    "name": "Porta Latas Camisa Personalizado",
+    "sku": "PLT-CAM-001",
+    "description": "Porta latas em neoprene no formato de camisa de time, personalizado. Mantém a bebida gelada por mais tempo.",
+    "tech_description": "Neoprene 3mm. Impressão digital.",
+    "status": true,
+    "featured": false,
+    "stock": 900,
+    "price": 9.9,
+    "min_quantity": 10,
+    "categories": [
+      {
+        "id": "cat-03",
+        "name": "Bebidas"
+      }
+    ],
+    "images": [
+      {
+        "url": "https://cdn.brindeme.com/porta-latas-camisa-personalizado.jpg",
+        "alt": "Porta Latas Camisa Personalizado"
+      }
+    ],
+    "customizations": [
+      {
+        "type": "impressão digital",
+        "description": "impressão digital"
+      }
+    ],
+    "subproducts": [
+      {
+        "id": "sub-010-branco",
+        "sku": "PLT-CAM-001-NCO",
+        "status": true,
+        "color": "Branco",
+        "stock": 900,
+        "prices": [
+          {
+            "min": 10,
+            "max": 99,
+            "price": 9.9
+          },
+          {
+            "min": 100,
+            "max": 9999,
+            "price": 7.4
+          }
+        ]
+      }
+    ],
+    "tags_ocasiao": [
+      "corporativo"
+    ]
+  },
+  {
+    "id": "prod-011",
+    "slug": "caneca-magica-personalizada",
+    "code": "CNC-MAG-001",
+    "name": "Caneca Mágica Personalizada",
+    "sku": "CNC-MAG-001",
+    "description": "Caneca mágica preta que revela a arte com o líquido quente. Personalização em sublimação, sob demanda.",
+    "tech_description": "Cerâmica 325ml. Sublimação. Revelação a partir de 60°C.",
+    "status": true,
+    "featured": false,
+    "stock": 400,
+    "price": 24.9,
+    "min_quantity": 50,
+    "categories": [
+      {
+        "id": "cat-01",
+        "name": "Canecas"
+      }
+    ],
+    "images": [
+      {
+        "url": "https://cdn.brindeme.com/caneca-magica-personalizada.jpg",
+        "alt": "Caneca Mágica Personalizada"
+      }
+    ],
+    "customizations": [
+      {
+        "type": "sublimação",
+        "description": "sublimação"
+      }
+    ],
+    "subproducts": [
+      {
+        "id": "sub-011-preta",
+        "sku": "CNC-MAG-001-ETA",
+        "status": true,
+        "color": "Preta",
+        "stock": 400,
+        "prices": [
+          {
+            "min": 50,
+            "max": 99,
+            "price": 24.9
+          },
+          {
+            "min": 100,
+            "max": 9999,
+            "price": 21.5
+          }
+        ]
+      }
+    ],
+    "tags_ocasiao": [
+      "corporativo"
+    ]
+  },
+  {
+    "id": "prod-012",
+    "slug": "escova-magica-para-cabelo",
+    "code": "ESC-MAG-001",
+    "name": "Escova Mágica para Cabelo",
+    "sku": "ESC-MAG-001",
+    "description": "Escova mágica desembaraçadora personalizada, com cerdas flexíveis. Brinde de beleza para campanhas e kits.",
+    "tech_description": "ABS com cerdas de nylon. Tampografia.",
+    "status": true,
+    "featured": false,
+    "stock": 700,
+    "price": 12.9,
+    "min_quantity": 10,
+    "categories": [
+      {
+        "id": "cat-08",
+        "name": "Beleza"
+      }
+    ],
+    "images": [
+      {
+        "url": "https://cdn.brindeme.com/escova-magica-para-cabelo.jpg",
+        "alt": "Escova Mágica para Cabelo"
+      }
+    ],
+    "customizations": [
+      {
+        "type": "tampografia",
+        "description": "tampografia"
+      }
+    ],
+    "subproducts": [
+      {
+        "id": "sub-012-rosa",
+        "sku": "ESC-MAG-001-OSA",
+        "status": true,
+        "color": "Rosa",
+        "stock": 700,
+        "prices": [
+          {
+            "min": 10,
+            "max": 99,
+            "price": 12.9
+          },
+          {
+            "min": 100,
+            "max": 9999,
+            "price": 9.9
+          }
+        ]
+      }
+    ],
+    "tags_ocasiao": [
+      "corporativo"
+    ]
+  },
+  {
+    "id": "prod-013",
+    "slug": "miniatura-empilhadeira-metal",
+    "code": "MIN-EMP-001",
+    "name": "Miniatura Empilhadeira Metal",
+    "sku": "MIN-EMP-001",
+    "description": "Miniatura de empilhadeira em metal, colecionável, personalizada com a marca. Brinde para o setor de logística e indústria.",
+    "tech_description": "Metal injetado, escala 1:50. Tampografia.",
+    "status": true,
+    "featured": false,
+    "stock": 50,
+    "price": 31.27,
+    "min_quantity": 20,
+    "categories": [
+      {
+        "id": "cat-09",
+        "name": "Colecionáveis"
+      }
+    ],
+    "images": [
+      {
+        "url": "https://cdn.brindeme.com/miniatura-empilhadeira-metal.jpg",
+        "alt": "Miniatura Empilhadeira Metal"
+      }
+    ],
+    "customizations": [
+      {
+        "type": "tampografia",
+        "description": "tampografia"
+      }
+    ],
+    "subproducts": [
+      {
+        "id": "sub-013-amarela",
+        "sku": "MIN-EMP-001-ELA",
+        "status": true,
+        "color": "Amarela",
+        "stock": 50,
+        "prices": [
+          {
+            "min": 20,
+            "max": 99,
+            "price": 31.27
+          },
+          {
+            "min": 100,
+            "max": 9999,
+            "price": 27.9
+          }
+        ]
+      }
+    ],
+    "tags_ocasiao": [
+      "corporativo"
+    ]
+  },
+  {
+    "id": "prod-014",
+    "slug": "carro-miniatura-fusca-metal",
+    "code": "MIN-CAR-001",
+    "name": "Carro Miniatura Fusca Metal",
+    "sku": "MIN-CAR-001",
+    "description": "Carro miniatura Fusca em metal, colecionável, personalizado. Brinde nostálgico para concessionárias e eventos.",
+    "tech_description": "Metal injetado, escala 1:36. Tampografia.",
+    "status": true,
+    "featured": false,
+    "stock": 900,
+    "price": 28,
+    "min_quantity": 20,
+    "categories": [
+      {
+        "id": "cat-09",
+        "name": "Colecionáveis"
+      }
+    ],
+    "images": [
+      {
+        "url": "https://cdn.brindeme.com/carro-miniatura-fusca-metal.jpg",
+        "alt": "Carro Miniatura Fusca Metal"
+      }
+    ],
+    "customizations": [
+      {
+        "type": "tampografia",
+        "description": "tampografia"
+      }
+    ],
+    "subproducts": [
+      {
+        "id": "sub-014-azul",
+        "sku": "MIN-CAR-001-ZUL",
+        "status": true,
+        "color": "Azul",
+        "stock": 900,
+        "prices": [
+          {
+            "min": 20,
+            "max": 99,
+            "price": 28
+          },
+          {
+            "min": 100,
+            "max": 9999,
+            "price": 24
+          }
+        ]
+      }
+    ],
+    "tags_ocasiao": [
+      "corporativo"
+    ]
   }
 ]

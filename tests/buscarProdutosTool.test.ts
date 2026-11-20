@@ -10,6 +10,7 @@ import { MemoryOccasionTagStore } from "../src/catalogo/ocasioes.js";
 import { createInitialState } from "../src/agent/state.js";
 import { ApiError, isFalhaApi, exigeTransferenciaImediata } from "../src/integrations/brindeme/errors.js";
 import { ClienteCatalogoFalso, produto, sub } from "./helpers/produtos.js";
+import { formatarAvisoTransferencia, resumoDoEstado } from "../src/api/resumoAtendente.js";
 
 const catalogo = () => [
   produto({
@@ -57,7 +58,6 @@ describe("buscar_produtos (ferramenta)", () => {
       total_estimado: 1540,
       min_quantity: 25,
       cores_disponiveis: ["Branco", "Preto"],
-      imagem_url: "https://cdn.teste/caneca.jpg",
       subprodutos: [
         { subproduto_id: "c-bco", cor: "Branco" },
         { subproduto_id: "c-pto", cor: "Preto" },
@@ -78,11 +78,15 @@ describe("buscar_produtos (ferramenta)", () => {
     expect(r.produtos[0].subprodutos).toEqual([{ subproduto_id: "pt-1" }]);
   });
 
-  it("sem quantidade: nenhum preço chega ao modelo, só o mínimo, e manda perguntar (eval 17)", async () => {
+  it("sem quantidade: preço do pedido mínimo, nenhum total, e manda perguntar (eval 17)", async () => {
     const r = await buscar({ consulta: "caneca" });
-    expect(r.aviso).toMatch(/pergunte a quantidade/i);
+    expect(r.aviso).toMatch(/pergunte quantas unidades/i);
     expect(r.produtos[0]).toMatchObject({ nome: "Caneca de Porcelana", min_quantity: 25 });
-    expect(JSON.stringify(r.produtos)).not.toMatch(/preco|total_estimado|18\.9/);
+    // Spec §4.4: o preço do pedido mínimo passa a ir. Sem nenhum preço, o modelo
+    // preenchia o vazio com valor inventado ou "a confirmar" (dogfooding de 09/11).
+    expect(r.produtos[0].preco_unitario_no_pedido_minimo).toBe(18.9);
+    // O total continua fora: o cliente ainda não disse quantas unidades quer.
+    expect(JSON.stringify(r.produtos)).not.toMatch(/total_estimado|preco_unitario_na_quantidade/);
   });
 
   it("não expõe estoque nem dado interno ao modelo; o id da cor só aparece em subprodutos", async () => {
@@ -128,11 +132,26 @@ describe("buscar_produtos (ferramenta)", () => {
 
   it("guarda as opções apresentadas, na ordem, e a busca seguinte as substitui ('a primeira opção')", async () => {
     const r = await buscar({ consulta: "caneca", quantidade: 100 });
-    expect(state.ultimasOpcoes).toEqual(r.produtos.map((p: Saida) => ({ id: p.id, nome: p.nome })));
+    expect(state.ultimasOpcoes?.map(({ id, nome }) => ({ id, nome }))).toEqual(r.produtos.map((p: Saida) => ({ id: p.id, nome: p.nome })));
 
     await buscar({ consulta: "squeeze", quantidade: 100 });
-    expect(state.ultimasOpcoes).toEqual([{ id: "squeeze", nome: "Squeeze de Alumínio" }]);
+    expect(state.ultimasOpcoes?.map(({ id, nome }) => ({ id, nome }))).toEqual([{ id: "squeeze", nome: "Squeeze de Alumínio" }]);
     expect(state.produtosDiscutidos).toEqual(expect.arrayContaining(["caneca", "squeeze"]));
+  });
+
+  it("[#28] as opções guardadas levam o subproduto_id de cada cor para o turno seguinte", async () => {
+    const r = await buscar({ consulta: "caneca", quantidade: 100 });
+    expect(state.ultimasOpcoes?.[0].cores).toEqual(
+      r.produtos[0].subprodutos.map((s: { subproduto_id: string; cor?: string }) => ({ subproduto_id: s.subproduto_id, cor: s.cor ?? "" }))
+    );
+    expect(state.ultimasOpcoes?.[0].cores?.length).toBeGreaterThan(0);
+  });
+
+  it("[#26] produto de uma busca anterior sai pelo nome na ficha, não pelo id", async () => {
+    await buscar({ consulta: "caneca", quantidade: 100 });
+    await buscar({ consulta: "squeeze", quantidade: 100 });
+    const texto = formatarAvisoTransferencia(state.telefone, resumoDoEstado(state, "desconto"));
+    expect(texto).toContain("Produtos: Caneca de Porcelana, Squeeze de Alumínio");
   });
 
   it("guarda a necessidade do cliente no estado", async () => {
@@ -152,7 +171,7 @@ describe("buscar_produtos (ferramenta)", () => {
       expect(r.motivo).toBe("regras_nao_fecham");
       expect(r.razao).toMatch(/pedido mínimo/);
       expect(r.ajustes_sugeridos).toEqual([
-        { tipo: "aumentar_quantidade", produto_id: "squeeze", nome: "Squeeze de Alumínio", quantidade: 50, preco_unitario: 12, total_estimado: 600 },
+        { tipo: "aumentar_quantidade", produto_id: "squeeze", nome: "Squeeze de Alumínio", quantidade: 50, preco_unitario: 12, total_estimado: 600, cor: "Azul", subproduto_id: "s-az" },
       ]);
       expect(r.instrucao_ao_agente).toMatch(/Não cite produto/);
     });

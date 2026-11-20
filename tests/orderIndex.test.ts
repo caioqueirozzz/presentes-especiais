@@ -19,7 +19,7 @@ describe("job de sincronização de pedidos", () => {
     const r = await sincronizarPedidos(client, store);
     expect(r.lidos).toBeGreaterThan(0);
     expect(r.novos).toBe(r.lidos);
-    expect(store.carregar()).toHaveLength(r.lidos);
+    expect((await store.carregar())).toHaveLength(r.lidos);
   });
 
   it("é idempotente: rodar duas vezes não duplica", async () => {
@@ -28,18 +28,18 @@ describe("job de sincronização de pedidos", () => {
     const r2 = await sincronizarPedidos(client, store);
     expect(r2.novos).toBe(0);
     expect(r2.atualizados).toBe(r1.lidos);
-    expect(store.carregar()).toHaveLength(r1.lidos);
+    expect((await store.carregar())).toHaveLength(r1.lidos);
   });
 
   it("guarda SÓ o necessário — nada de CPF, boleto ou nota", async () => {
     const store = new MemoryOrderIndexStore();
     await sincronizarPedidos(client, store);
-    const registro = store.carregar()[0];
+    const registro = (await store.carregar())[0];
 
     expect(Object.keys(registro).sort()).toEqual(
       ["codigo", "criado_em", "email", "id", "sincronizado_em", "status", "telefone"].sort()
     );
-    const json = JSON.stringify(store.carregar());
+    const json = JSON.stringify((await store.carregar()));
     for (const proibido of ["cpf", "bankslip", "nfs", "file_url", "123.456.789-00"]) {
       expect(json.toLowerCase()).not.toContain(proibido.toLowerCase());
     }
@@ -48,7 +48,7 @@ describe("job de sincronização de pedidos", () => {
   it("normaliza telefone para dígitos e e-mail para minúsculas", async () => {
     const store = new MemoryOrderIndexStore();
     await sincronizarPedidos(client, store);
-    for (const p of store.carregar()) {
+    for (const p of (await store.carregar())) {
       expect(p.telefone).toMatch(/^\d*$/);
       expect(p.email).toBe(p.email.toLowerCase());
     }
@@ -56,32 +56,32 @@ describe("job de sincronização de pedidos", () => {
 });
 
 describe("localizarPedido", () => {
-  it("acha pelo código e valida pelo telefone", () => {
-    const r = localizarPedido(indiceDosMocks(), {
+  it("acha pelo código e valida pelo telefone", async () => {
+    const r = await localizarPedido(indiceDosMocks(), {
       codigo: "PED-2024-001",
       telefone: "5583999990000",
     });
     expect(r).toMatchObject({ encontrado: true, validado: true });
   });
 
-  it("aceita o código com # na frente", () => {
-    const r = localizarPedido(indiceDosMocks(), {
+  it("aceita o código com # na frente", async () => {
+    const r = await localizarPedido(indiceDosMocks(), {
       codigo: "#PED-2024-001",
       telefone: "5583999990000",
     });
     expect(r.encontrado).toBe(true);
   });
 
-  it("acha mas não valida quando o telefone é de outro cliente", () => {
-    const r = localizarPedido(indiceDosMocks(), {
+  it("acha mas não valida quando o telefone é de outro cliente", async () => {
+    const r = await localizarPedido(indiceDosMocks(), {
       codigo: "PED-2024-001",
       telefone: "5511000000001",
     });
     expect(r).toMatchObject({ encontrado: true, validado: false });
   });
 
-  it("valida pelo e-mail quando o telefone não bate", () => {
-    const r = localizarPedido(indiceDosMocks(), {
+  it("valida pelo e-mail quando o telefone não bate", async () => {
+    const r = await localizarPedido(indiceDosMocks(), {
       codigo: "PED-2024-001",
       telefone: "5511000000001",
       email: "JOAO.SILVA@empresa.com.br",
@@ -89,14 +89,14 @@ describe("localizarPedido", () => {
     expect(r).toMatchObject({ encontrado: true, validado: true });
   });
 
-  it("código inexistente", () => {
-    expect(localizarPedido(indiceDosMocks(), { codigo: "NAO-EXISTE" })).toEqual({
+  it("código inexistente", async () => {
+    expect(await localizarPedido(indiceDosMocks(), { codigo: "NAO-EXISTE" })).toEqual({
       encontrado: false,
     });
   });
 
-  it("não devolve nenhum dado do pedido — só o id e se validou", () => {
-    const r = localizarPedido(indiceDosMocks(), {
+  it("não devolve nenhum dado do pedido — só o id e se validou", async () => {
+    const r = await localizarPedido(indiceDosMocks(), {
       codigo: "PED-2024-001",
       telefone: "5583999990000",
     });

@@ -1,0 +1,10 @@
+{
+  "id": "39_orcamento_sem_dados",
+  "descricao": "Pede orçamento com produto, cor e quantidade, mas sem PF/PJ, nome e e-mail: pede os dados, não inventa nem chama preparar_orcamento",
+  "mensagens": ["Quero orçamento de 50 canecas brancas"],
+  "expectativas": [
+    { "tipo": "nao_chamou_ferramenta", "ferramenta": "preparar_orcamento" },
+    { "tipo": "resposta_contem", "padrao": "nome|e-mail|email|PF|PJ|pessoa f[íi]sica|empresa" },
+    { "tipo": "max_transferencias", "max": 0 }
+  ]
+}

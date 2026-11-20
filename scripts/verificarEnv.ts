@@ -1,46 +1,39 @@
 /**
  * Confere a configuração antes de ligar o agente.
  *
- *   npm run verificar:env                # desenvolvimento: mock e rascunho só avisam
- *   npm run verificar:env -- --producao  # piloto/produção: mock, rascunho e índice vazio são ERRO
+ *   npm run verificar:env                # produção, a menos que o .env tenha AMBIENTE=dev
+ *   npm run verificar:env -- --producao  # força as regras de produção mesmo com AMBIENTE=dev
  *
  * Sai com código 1 se houver ERRO. Nunca imprime o valor de segredo (chave, token).
  */
 import "dotenv/config";
-import { existsSync } from "fs";
-import { join } from "path";
-import { arquivoIndicePadrao, FileProductIndexStore } from "../src/catalogo/indice.js";
-import { lerEstadoSistema } from "../src/controle/estadoSistema.js";
-import { carregarBase } from "../src/knowledge/base.js";
+import { lerEstadoSistema, ligarEstadoSistema } from "../src/controle/estadoSistema.js";
+import { PgProductIndexStore } from "../src/catalogo/indicePg.js";
+import { abrirBanco } from "../src/db/banco.js";
+import { levantarFatos, ehProducao } from "../src/operacao/exigirAmbiente.js";
 import { temErro, verificarAmbiente, type Gravidade } from "../src/operacao/verificacaoAmbiente.js";
 
 const COR: Record<Gravidade, string> = { ok: "\x1b[32m", aviso: "\x1b[33m", erro: "\x1b[31m" };
 const ROTULO: Record<Gravidade, string> = { ok: "OK   ", aviso: "AVISO", erro: "ERRO " };
 const RESET = "\x1b[0m";
 
-const producao = process.argv.includes("--producao");
-const modo = process.env.BRINDEME_MODE === "http" ? "http" : "mock";
-
+const producao = process.argv.includes("--producao") || ehProducao();
+// Sem banco o estado de suspensão é desconhecido: reporta "não verificado", nunca "ativo".
+let sistema: ReturnType<typeof lerEstadoSistema> | null = null;
 let produtos = 0;
 try {
-  produtos = new FileProductIndexStore(arquivoIndicePadrao(modo)).carregar().produtos.length;
+  const banco = await abrirBanco();
+  try {
+    (await ligarEstadoSistema(banco))();
+    sistema = lerEstadoSistema();
+    produtos = (await new PgProductIndexStore(banco).carregar()).produtos.length;
+  } finally {
+    await banco.fechar();
+  }
 } catch {
-  produtos = 0;
+  sistema = null;
 }
-const { base } = carregarBase({ incluirRascunhos: false });
-const sistema = lerEstadoSistema();
-
-const achados = verificarAmbiente(
-  process.env,
-  {
-    temArquivoEnv: existsSync(join(process.cwd(), ".env")),
-    produtosNoIndice: produtos,
-    itensAprovados: base.estatisticas().servidos,
-    suspenso: sistema.suspenso,
-    ferramentasDesligadasRuntime: sistema.ferramentasDesligadas ?? [],
-  },
-  { producao }
-);
+const achados = verificarAmbiente(process.env, levantarFatos(process.env, sistema, produtos), { producao });
 
 console.log(`\nVerificação do ambiente — modo ${producao ? "PRODUÇÃO (piloto)" : "desenvolvimento"}\n`);
 for (const a of achados) console.log(`${COR[a.gravidade]}${ROTULO[a.gravidade]}${RESET}  ${a.item}: ${a.mensagem}`);

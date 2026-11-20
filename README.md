@@ -202,8 +202,8 @@ Guia para a equipe da loja: **[docs/base-de-conhecimento.md](docs/base-de-conhec
 
 ### O que ficou pronto
 
-- **Ferramenta `consultar_conhecimento`**: responde dúvidas gerais só com item aprovado; sem resposta na base, registra a **lacuna** (`data/lacunas.jsonl`, mascarada) e devolve `instrucao: "transferir"` com `motivo_sugerido: "lacuna_conhecimento"`. O log do turno guarda os `id`s usados (`kb_consulta`, `kb_itens` em `response_sent`).
-- **Índice do catálogo** (`data/produtos-index.json`): nome, descrição, categorias, cores com estoque, faixas de preço, mínimo, imagem principal e personalizações. Incremental por `updated_at`; ver decisão 21 para as regras de segurança.
+- **Ferramenta `consultar_conhecimento`**: responde dúvidas gerais só com item aprovado; sem resposta na base, registra a **lacuna** (tabela `agente.lacunas`, mascarada) e devolve `instrucao: "transferir"` com `motivo_sugerido: "lacuna_conhecimento"`. O log do turno guarda os `id`s usados (`kb_consulta`, `kb_itens` em `response_sent`).
+- **Índice do catálogo** (no banco, `agente.produtos`): nome, descrição, categorias, cores com estoque, faixas de preço, mínimo, imagem principal e personalizações. Incremental por `updated_at`; ver decisão 21 para as regras de segurança.
 - **Recomendação em 5 passos** (`src/catalogo/recomendar.ts`): filtros rígidos → ordem por similaridade, ocasião e destaque → até 3 opções com preço da faixa e total → reconferência na API → sem resultado: explica e propõe o ajuste mais próximo (aumentar quantidade, reduzir quantidade ou subir o valor), **verificado pelas mesmas regras**.
 - `buscar_produtos` ganhou `orcamento_total` (exige `quantidade`) e passa a devolver `total_estimado`. Sem quantidade, devolve `preco_a_partir_de` na quantidade mínima, com aviso.
 - Prompt: FAQ removida; regras de coleta (uma pergunta por vez, quantidade antes de preço), apresentação (máx. 3, só dados da ferramenta) e a regra de chamar `transferir_humano` quando o retorno trouxer `instrucao: "transferir"` (o ajuste sugerido para o cenário 11 abaixo).
@@ -211,15 +211,16 @@ Guia para a equipe da loja: **[docs/base-de-conhecimento.md](docs/base-de-conhec
 ### Comandos
 
 ```bash
-npm run sync:catalogo                  # catálogo → índice (rodar de hora em hora)
+npm run sync:catalogo                  # catálogo → banco (a API sincroniza sozinha a cada CATALOGO_INTERVALO_MIN, padrão 45)
 npm run sync:catalogo -- --forcar      # relê o detalhe de todos os produtos ativos
+npm run sync:precos                    # preço de venda do site → índice (job noturno, fora do agente)
 npm run kb:validar                     # estado da base por categoria e responsável
 npm run kb:validar -- --exigir-aprovacao   # falha se houver item não aprovado (gate de release)
 npm run kb:lacunas                     # perguntas que a base não soube responder
 npm run avaliar:recomendacao           # confere os pedidos na API e gera a planilha da equipe
 ```
 
-No modo `mock` o chat monta o índice sozinho. Com `BRINDEME_MODE=http` ele **não** sincroniza sozinho (são milhares de produtos): rode `npm run sync:catalogo` antes; sem índice, `buscar_produtos` falha de forma explícita e o agente transfere.
+No modo `mock` o chat monta o índice sozinho. Com `BRINDEME_MODE=http` a API sincroniza sozinha a cada `CATALOGO_INTERVALO_MIN` (padrão 45); o `npm run sync:catalogo` serve para a primeira carga ou para forçar. Sem índice, `buscar_produtos` falha de forma explícita e o agente transfere.
 
 ### Como foi verificado — e o que não foi
 

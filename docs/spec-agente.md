@@ -80,7 +80,7 @@ Cliente ⇄ WhatsApp ⇄ chip da loja ⇄ PONTE (src/whatsapp) ──HTTP 127.0.
 | `src/catalogo/`, `src/busca/` | Índice do catálogo, recomendação em 5 passos, busca BM25 em português |
 | `src/knowledge/` | Base de conhecimento (`base/*.json`), etiquetas de ocasião, lacunas |
 | `src/conversas/` | Estado de cada conversa em disco |
-| `src/controle/` | Kill switch e ferramentas desligadas (`data/estado-sistema.json`) |
+| `src/controle/` | Kill switch e ferramentas desligadas (`agente.estado_sistema`) |
 | `src/operacao/` | Verificação do ambiente, retenção e relatório do piloto |
 | `src/duble/` | Dublê do agente (`eco` e `direto`) para testar a ponte sem o agente definitivo |
 | `src/cli.ts` | Chat no terminal, sem WhatsApp |
@@ -138,7 +138,7 @@ As 7 ferramentas ficam em `src/tools/`. Os nomes estão em `src/tools/nomes.ts`,
 
 ## 6. Estado e modos da conversa
 
-Cada conversa é um arquivo `data/conversas/<telefone>.json` (`ConversationState`, em `src/agent/state.ts`). Ele guarda:
+Cada conversa é uma linha de `agente.conversas`, com o telefone como chave e o `ConversationState` (`src/agent/state.ts`) no `doc`. Ela guarda:
 
 - o **modo** (`ia` ou `humano`);
 - os dados do cliente (tipo, nome, e-mail) e da necessidade (ocasião, quantidade, valor, data);
@@ -153,7 +153,7 @@ Cada conversa é um arquivo `data/conversas/<telefone>.json` (`ConversationState
 | `humano` | A equipe, pelo chip | `transferir_humano` ou mensagem do atendente | `#devolver <telefone> [nota]` |
 | **suspenso** (global) | Ninguém automaticamente | `#suspender [motivo]` | `#retomar` |
 
-A suspensão e as ferramentas desligadas ficam em `data/estado-sistema.json`, que a ponte e o agente leem (cache de 30 s).
+A suspensão e as ferramentas desligadas ficam em `agente.estado_sistema`, que a ponte e o agente leem (cache de 30 s).
 
 ---
 
@@ -218,7 +218,7 @@ API REST da Brinde.me em `https://api.brinde.me`, autenticada pelo header `X-Api
 
 **Base de conhecimento** (`src/knowledge/base/<categoria>.json`): 17 itens em 7 categorias (arte, entrega, institucional, pagamento, prazos, processo comercial, trocas e defeitos). Cada item tem `status` (aprovado ou rascunho), dono e data de revisão. **Hoje nenhum item está aprovado** (issue #13), então toda dúvida geral vira lacuna e vai para uma pessoa. Guia da loja: [base-de-conhecimento.md](base-de-conhecimento.md).
 
-**Catálogo:** índice local em `data/produtos-index.json`, com 6.527 produtos, montado por `npm run sync:catalogo`. A primeira carga leva cerca de 3,6 h a 30 req/min. Com o índice pronto, o agente faz um sync incremental ao subir e a cada 6 h; um produto é relido se passar de 24 h no índice.
+**Catálogo:** índice em `agente.produtos` (cerca de 6,6 mil produtos), montado por `npm run sync:catalogo`. A primeira carga leva cerca de 3,6 h a 30 req/min. Com o índice pronto, a API faz um sync incremental ao subir e a cada `CATALOGO_INTERVALO_MIN` (padrão 45 min), um por vez. Depois de cada sync, ela gera os tipos e vetores do que mudou. Um produto é relido se passar de 24 h no índice.
 
 **Recomendação em 5 passos** (`src/catalogo/recomendar.ts`):
 1. filtros rígidos (ativo, mínimo, estoque por cor, valor);

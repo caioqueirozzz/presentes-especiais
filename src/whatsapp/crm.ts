@@ -1,7 +1,5 @@
-import { readFile } from "fs/promises";
-import { join } from "path";
 import type { LogPonte } from "./log.js";
-import type { MensagemObservada, ObservadorPonte } from "./ponte.js";
+import type { MensagemObservada, MidiaObservada, ObservadorPonte } from "./ponte.js";
 
 /*
  * Envia ao CRM, em tempo real, cada mensagem da conversa e o estado da conversa que o agente gravou.
@@ -10,12 +8,15 @@ import type { MensagemObservada, ObservadorPonte } from "./ponte.js";
  */
 
 const MAX_FILA = 2_000;
+// Com o CRM fora por muito tempo, os áudios em base64 não podem crescer sem limite na memória da ponte
+const MAX_BYTES_MIDIAS = 50 * 1024 * 1024;
 const INTERVALO_MS = 2_000;
 const ESPERA_MAX_MS = 60_000;
 const ATRASO_CONVERSA_MS = 1_500;
 
 type Item =
   | { rota: "mensagens"; corpo: MensagemObservada & { nome?: string } }
+  | { rota: "midias"; corpo: MidiaObservada }
   | { rota: "conversas"; telefone: string };
 
 export class ObservadorCrm implements ObservadorPonte {
@@ -28,7 +29,7 @@ export class ObservadorCrm implements ObservadorPonte {
   constructor(
     private readonly url: string,
     private readonly segredo: string,
-    private readonly conversasDir: string,
+    private readonly lerConversa: (telefone: string) => Promise<unknown | null>,
     private readonly log: LogPonte
   ) {
     setInterval(() => void this.esvaziar(), INTERVALO_MS).unref();
@@ -36,6 +37,14 @@ export class ObservadorCrm implements ObservadorPonte {
 
   mensagem(m: MensagemObservada): void {
     this.enfileirar({ rota: "mensagens", corpo: m });
+  }
+
+  /**
+   * shortcut: os bytes do áudio ficam na memória da fila até o CRM aceitar; se a ponte reiniciar com o CRM
+   * fora, o áudio se perde (a transcrição já foi para a Lia). Trocar por fila em disco quando a ponte for para a nuvem.
+   */
+  midia(m: MidiaObservada): void {
+    this.enfileirar({ rota: "midias", corpo: m });
   }
 
   conversaAtualizada(telefone: string): void {
@@ -56,8 +65,25 @@ export class ObservadorCrm implements ObservadorPonte {
       this.fila.shift();
       this.log({ type: "crm_fila_cheia" });
     }
+    if (item.rota === "midias") this.abrirEspacoParaMidia(item.corpo.base64.length);
     this.fila.push(item);
     void this.esvaziar();
+  }
+
+  /** Descarta os áudios mais antigos até o novo caber; o que está sendo enviado agora não sai (o shift dele viria depois). */
+  private abrirEspacoParaMidia(novo: number): void {
+    let total = novo;
+    for (const i of this.fila) if (i.rota === "midias") total += i.corpo.base64.length;
+    for (let k = this.enviando ? 1 : 0; total > MAX_BYTES_MIDIAS && k < this.fila.length; ) {
+      const i = this.fila[k];
+      if (i.rota !== "midias") {
+        k++;
+        continue;
+      }
+      this.fila.splice(k, 1);
+      total -= i.corpo.base64.length;
+      this.log({ type: "crm_midia_descartada", id: i.corpo.id, telefone: i.corpo.telefone });
+    }
   }
 
   private async esvaziar(): Promise<void> {
@@ -85,10 +111,11 @@ export class ObservadorCrm implements ObservadorPonte {
     let corpo: unknown;
     if (item.rota === "conversas") {
       try {
-        corpo = JSON.parse(await readFile(join(this.conversasDir, `${item.telefone}.json`), "utf8"));
+        corpo = await this.lerConversa(item.telefone);
       } catch {
-        return true; // conversa ainda sem arquivo (ex.: só mensagens do atendente)
+        return false; // banco fora: tenta de novo depois
       }
+      if (corpo === null) return true; // conversa ainda sem registro (ex.: só mensagens do atendente)
     } else {
       corpo = item.corpo;
     }

@@ -7,7 +7,7 @@
  *   npm run sync:catalogo -- --ritmo 55      # req/min; só com o agente desligado (a API corta em 60/min)
  *
  * Lê GET /product página por página e GET /product/{id} dos produtos ativos que
- * mudaram, e grava data/produtos-index.json (no mock, data/produtos-index-mock.json). Somente leitura na API.
+ * mudaram, e grava no banco (schema agente). Só com BRINDEME_MODE=http. Somente leitura na API.
  *
  * Pensado para rodar de hora em hora (cron / agendador). Só relê o detalhe de
  * quem mudou (updated_at) ou passou da idade máxima; estoque e preço que o
@@ -15,8 +15,9 @@
  */
 import "dotenv/config";
 import { createBrindeMeClient } from "../src/integrations/brindeme/factory.js";
-import { relative } from "path";
-import { arquivoIndicePadrao, FileProductIndexStore, sincronizarCatalogo } from "../src/catalogo/indice.js";
+import { abrirCatalogoHttp } from "../src/catalogo/abrir.js";
+import { IndiceMudouError } from "../src/catalogo/indicePg.js";
+import { sincronizarCatalogo } from "../src/catalogo/indice.js";
 import { config } from "../src/config.js";
 
 const GREEN = "\x1b[32m";
@@ -44,50 +45,71 @@ async function main() {
     `${GRAY}  modo: ${config.brindeMe.mode} · concorrência: ${concorrencia} · ritmo: ${ritmo} req/min${forcar ? " · forçado" : ""}${RESET}\n`
   );
 
-  const client = createBrindeMeClient({ reqPorMinuto: ritmo });
-  const store = new FileProductIndexStore();
-  const inicio = Date.now();
-  let ultimaLinha = "";
+  const { store, fechar } = await abrirCatalogoHttp("sync:catalogo");
+  try {
+    const client = createBrindeMeClient({ reqPorMinuto: ritmo });
+    const inicio = Date.now();
+    let ultimaLinha = "";
 
-  const r = await sincronizarCatalogo(client, store, {
-    concorrencia,
-    maxPaginas,
-    forcar,
-    maxIdadeHoras: config.catalogo.maxIdadeHoras,
-    onProgresso: (e) => {
-      const linha =
-        e.fase === "listagem"
-          ? `  listando… ${e.feitos}${e.total ? ` de ${e.total}` : ""}`
-          : `  lendo detalhes… ${e.feitos} de ${e.total}`;
-      if (process.stdout.isTTY && linha !== ultimaLinha) {
-        process.stdout.write(`\r${GRAY}${linha}${RESET}   `);
-        ultimaLinha = linha;
-      }
-    },
-  });
-  if (process.stdout.isTTY) process.stdout.write("\r" + " ".repeat(60) + "\r");
+    const r = await sincronizarCatalogo(client, store, {
+      concorrencia,
+      maxPaginas,
+      forcar,
+      maxIdadeHoras: config.catalogo.maxIdadeHoras,
+      onProgresso: (e) => {
+        const linha =
+          e.fase === "listagem"
+            ? `  listando… ${e.feitos}${e.total ? ` de ${e.total}` : ""}`
+            : `  lendo detalhes… ${e.feitos} de ${e.total}`;
+        if (process.stdout.isTTY && linha !== ultimaLinha) {
+          process.stdout.write(`\r${GRAY}${linha}${RESET}   `);
+          ultimaLinha = linha;
+        }
+      },
+    });
+    if (process.stdout.isTTY) process.stdout.write("\r" + " ".repeat(60) + "\r");
 
-  const segundos = ((Date.now() - inicio) / 1000).toFixed(1);
-  console.log(`${GREEN}✓${RESET} ${r.listados} produto(s) listado(s) em ${r.paginas} página(s), ${r.ativos} ativo(s)`);
-  console.log(
-    `${GRAY}  detalhe lido: ${r.lidosNoDetalhe} · reaproveitados: ${r.reaproveitados} · novos: ${r.novos} · removidos: ${r.removidos}${RESET}`
-  );
-  console.log(`${GRAY}  índice: ${relative(process.cwd(), arquivoIndicePadrao(config.brindeMe.mode))} · ${segundos}s${RESET}`);
-
-  if (!r.listagemCompleta) {
+    const segundos = ((Date.now() - inicio) / 1000).toFixed(1);
+    console.log(`${GREEN}✓${RESET} ${r.listados} produto(s) listado(s) em ${r.paginas} página(s), ${r.ativos} ativo(s)`);
     console.log(
-      `${YELLOW}!${RESET} listagem cortada em ${maxPaginas} páginas: nada foi removido do índice. Aumente --max-paginas.`
+      `${GRAY}  detalhe lido: ${r.lidosNoDetalhe} · reaproveitados: ${r.reaproveitados} · novos: ${r.novos} · removidos: ${r.removidos}${RESET}`
     );
-  }
-  if (r.falhas.length > 0) {
-    console.log(`${YELLOW}!${RESET} ${r.falhas.length} produto(s) sem detalhe (registro anterior mantido):`);
-    for (const f of r.falhas.slice(0, 10)) console.log(`${GRAY}    ${f.id}: ${f.erro}${RESET}`);
-    if (r.falhas.length > 10) console.log(`${GRAY}    … e mais ${r.falhas.length - 10}${RESET}`);
-    console.log(`${YELLOW}!${RESET} índice marcado incompleto. Rode de novo: só os que faltaram são lidos.`);
+    console.log(`${GRAY}  ${segundos}s${RESET}`);
+
+    if (!r.listagemCompleta) {
+      console.log(
+        `${YELLOW}!${RESET} listagem cortada em ${maxPaginas} páginas: nada foi removido do índice. Aumente --max-paginas.`
+      );
+    }
+    if (r.falhas.length > 0) {
+      console.log(`${YELLOW}!${RESET} ${r.falhas.length} produto(s) sem detalhe (registro anterior mantido):`);
+      for (const f of r.falhas.slice(0, 10)) console.log(`${GRAY}    ${f.id}: ${f.erro}${RESET}`);
+      if (r.falhas.length > 10) console.log(`${GRAY}    … e mais ${r.falhas.length - 10}${RESET}`);
+      console.log(`${YELLOW}!${RESET} índice marcado incompleto. Rode de novo: só os que faltaram são lidos.`);
+    }
+
+    // Produto novo sem tipo e sem vetor fica de fora do filtro da busca semântica até a
+    // próxima geração, por isso ela vem logo atrás do sync (spec §3.3). Só o que mudou é
+    // regerado, então o custo é de centavos. `--sem-vetores` pula.
+    if (process.argv.includes("--sem-vetores")) return;
+    console.log("");
+    const { gerarEImprimir } = await import("./gerarVetores.js");
+    // A trava de 5% não invalida o sync: o índice novo já está gravado e vale. Mas a
+    // busca segue com os vetores anteriores, e quem chamou precisa saber disso.
+    if (!(await gerarEImprimir())) {
+      console.log(`${YELLOW}!${RESET} índice atualizado, tipos e vetores NÃO. A busca semântica segue com os anteriores.`);
+      process.exitCode = 1;
+    }
+  } finally {
+    await fechar();
   }
 }
 
 main().catch((err) => {
+  if (err instanceof IndiceMudouError) {
+    console.error(`${RED}✗${RESET} o índice mudou durante a execução e nada foi gravado. Rode npm run sync:catalogo de novo.`);
+    process.exit(1);
+  }
   console.error(`${RED}✗${RESET} sincronização abortada, índice anterior preservado: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });

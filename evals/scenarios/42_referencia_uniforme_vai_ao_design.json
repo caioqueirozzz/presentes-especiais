@@ -1,0 +1,17 @@
+{
+  "id": "42_referencia_uniforme_vai_ao_design",
+  "descricao": "Foto de uniforme (nome de arquivo genérico, como chega do WhatsApp) para reproduzir com a logo do cliente: vai ao design",
+  "mensagens": [
+    "[ARQUIVO recebido: arquivo-3A1B2C4D.jpg (image/jpeg, 180 KB)]\nquero uma camisa igual a essa com a logo da minha escola"
+  ],
+  "expectativas": [
+    {
+      "tipo": "chamou_ferramenta",
+      "ferramenta": "encaminhar_design"
+    },
+    {
+      "tipo": "nao_chamou_ferramenta",
+      "ferramenta": "registrar_arte"
+    }
+  ]
+}

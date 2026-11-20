@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from "child_process";
 import { existsSync } from "fs";
 import { config } from "../src/config.js";
 import { manterVivo, matarArvore } from "../src/lancador.js";
+import { logarErroBanco } from "../src/db/banco.js";
 
 const AGENTES: Record<string, string[]> = {
   api: ["src/api/index.ts"],
@@ -87,6 +88,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error("Falha:", logarErroBanco(err));
   process.exit(1);
 });

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { query, transaction } from "@/lib/db";
 import type { Executor as Tx } from "@/lib/db";
 import { detectarIntencao } from "@/lib/intencao";
+import { designerDaConversa, receberRespostaDoCliente } from "@/lib/design";
 import { autoAssignLead, logEvent, notify } from "@/lib/leads";
 import { phoneVariants } from "@/lib/orders";
 import type { LeadQualification, QualificationStatus } from "@/lib/types";
@@ -479,7 +480,7 @@ export async function ingestLiveMessage(m: LiveMessage): Promise<{ leadId: strin
        VALUES ($1, $2, $3, $4, $5, 'WHATSAPP', $6) ON CONFLICT (lead_id, external_id) DO NOTHING RETURNING id`,
       [lead.id, m.id, author, body, sentAt, kind]
     );
-    if (!inserted.length) return { leadId: lead.id, created: false, inserted: false, notifySeller: null as string | null };
+    if (!inserted.length) return { leadId: lead.id, created: false, inserted: false, fromClient: false };
 
     const fromClient = author === "CLIENTE";
     await tx.query(
@@ -510,14 +511,21 @@ export async function ingestLiveMessage(m: LiveMessage): Promise<{ leadId: strin
       }
     }
 
-    // Cliente escreveu numa conversa que está com uma pessoa: avisa o vendedor (uma vez por rodada de não lidas)
-    const notifySeller = fromClient && lead.agent_mode === "humano" && lead.assigned_to && lead.unread_count === 0 ? lead.assigned_to : null;
-    if (notifySeller) {
-      await notify(tx, notifySeller, "Cliente respondeu", `${lead.name || phone}: ${body.slice(0, 120)}`, `/app/crm?lead=${lead.id}`);
+    // Cliente escreveu numa conversa que está com uma pessoa: avisa quem atende (uma vez por rodada de não lidas).
+    // Com a conversa no designer, o aviso vai a ele; o lead continua do vendedor.
+    if (fromClient && lead.agent_mode === "humano" && lead.unread_count === 0) {
+      const designer = await designerDaConversa(tx, lead.id);
+      const to = designer ?? lead.assigned_to;
+      const link = designer ? "/app/design" : `/app/crm?lead=${lead.id}`;
+      if (to) await notify(tx, to, "Cliente respondeu", `${lead.name || phone}: ${body.slice(0, 120)}`, link);
     }
-    return { leadId: lead.id, created: created.length > 0, inserted: true, notifySeller };
+    return { leadId: lead.id, created: created.length > 0, inserted: true, fromClient };
   });
 
   if (result.created) await autoAssignLead(result.leadId);
+  if (result.inserted && result.fromClient && kind === "texto") {
+    // A mensagem já está gravada: erro no design não pode virar 500 (a ponte reenviaria)
+    await receberRespostaDoCliente(result.leadId, body, m.id, m.timestamp).catch((err) => console.error("confirmação de design:", err));
+  }
   return { leadId: result.leadId, created: result.created, inserted: result.inserted };
 }

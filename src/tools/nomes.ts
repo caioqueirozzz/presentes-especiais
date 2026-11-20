@@ -11,6 +11,7 @@ export const NOMES_FERRAMENTAS = [
   "andamento_pedido",
   "consultar_pedido",
   "registrar_arte",
+  "encaminhar_design",
   "registrar_contexto",
   "iniciar_novo_pedido",
   "transferir_humano",

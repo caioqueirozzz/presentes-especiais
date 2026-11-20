@@ -3,7 +3,7 @@ import { isUuid, readJson, requireUser, serverError } from "@/lib/access";
 import { query } from "@/lib/db";
 
 export async function GET() {
-  const guard = await requireUser();
+  const guard = await requireUser({ allowDesigner: true });
   if (guard.error) return guard.error;
   try {
     const notifications = await query(
@@ -18,7 +18,7 @@ export async function GET() {
 
 /** Marca como lida: `{ id }` ou `{ all: true }` (sempre só as do próprio usuário) */
 export async function POST(request: Request) {
-  const guard = await requireUser();
+  const guard = await requireUser({ allowDesigner: true });
   if (guard.error) return guard.error;
   const body = await readJson(request);
   try {

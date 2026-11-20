@@ -6,13 +6,9 @@
  * Guarda a pergunta mascarada (telefone, e-mail e CPF) e o id da conversa; nada
  * além disso.
  */
-import { appendFileSync, mkdirSync, existsSync, readFileSync } from "fs";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
 import { tokenizar } from "../busca/texto.js";
 import { mascararTexto } from "../logging/logger.js";
-
-const __dir = dirname(fileURLToPath(import.meta.url));
+import { logarErroBanco, type Banco } from "../db/banco.js";
 
 export interface Lacuna {
   pergunta: string;
@@ -23,8 +19,8 @@ export interface Lacuna {
 }
 
 export interface LacunaStore {
-  registrar(lacuna: Lacuna): void;
-  listar(): Lacuna[];
+  registrar(lacuna: Lacuna): Promise<void>;
+  listar(): Promise<Lacuna[]>;
 }
 
 const LIMITE_PERGUNTA = 300;
@@ -45,39 +41,39 @@ export function criarLacuna(
 
 export class MemoryLacunaStore implements LacunaStore {
   private readonly itens: Lacuna[] = [];
-  registrar(l: Lacuna): void {
+  async registrar(l: Lacuna): Promise<void> {
     this.itens.push(l);
   }
-  listar(): Lacuna[] {
+  async listar(): Promise<Lacuna[]> {
     return [...this.itens];
   }
 }
 
-/** Um registro por linha (JSONL): anexar é atômico o bastante para vários processos. */
-export class FileLacunaStore implements LacunaStore {
-  constructor(private readonly file = join(__dir, "../../data/lacunas.jsonl")) {}
+export class PgLacunaStore implements LacunaStore {
+  constructor(private readonly banco: Banco) {}
 
-  registrar(l: Lacuna): void {
+  async registrar(l: Lacuna): Promise<void> {
     try {
-      mkdirSync(dirname(this.file), { recursive: true });
-      appendFileSync(this.file, JSON.stringify(l) + "\n", "utf-8");
-    } catch {
+      await this.banco.query(
+        "INSERT INTO agente.lacunas (conversa_id, pergunta, categoria_sugerida, registrado_em) VALUES ($1, $2, $3, $4)",
+        [l.conversa_id, l.pergunta, l.categoria_sugerida ?? null, l.registrado_em]
+      );
+    } catch (err) {
       // Registrar lacuna não pode derrubar o atendimento.
+      console.error(JSON.stringify({ type: "lacuna_nao_registrada", ...logarErroBanco(err) }));
     }
   }
 
-  listar(): Lacuna[] {
-    if (!existsSync(this.file)) return [];
-    const out: Lacuna[] = [];
-    for (const linha of readFileSync(this.file, "utf-8").split("\n")) {
-      if (!linha.trim()) continue;
-      try {
-        out.push(JSON.parse(linha) as Lacuna);
-      } catch {
-        // linha truncada: ignora
-      }
-    }
-    return out;
+  async listar(): Promise<Lacuna[]> {
+    const linhas = await this.banco.query<{ conversa_id: string; pergunta: string; categoria_sugerida: string | null; registrado_em: Date }>(
+      "SELECT conversa_id, pergunta, categoria_sugerida, registrado_em FROM agente.lacunas ORDER BY registrado_em, id"
+    );
+    return linhas.map((r) => ({
+      pergunta: r.pergunta,
+      conversa_id: r.conversa_id,
+      ...(r.categoria_sugerida ? { categoria_sugerida: r.categoria_sugerida } : {}),
+      registrado_em: new Date(r.registrado_em).toISOString(),
+    }));
   }
 }
 

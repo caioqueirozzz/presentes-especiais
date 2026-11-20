@@ -11,12 +11,14 @@
  *    cores dependeria de como a plataforma faixa o preço de um pedido dividido
  *    em linhas (por linha? pelo total?), o que a spec não diz. Prefere-se não
  *    sugerir a sugerir um preço que o orçamento depois contradiz.
+ *  - SOB DEMANDA (src/knowledge/sob-demanda.json): estoque ignorado.
  *  - PREÇO é o da faixa que contém a quantidade, de cada cor. A oferta lista só
  *    as cores que cobrem a quantidade E cabem no orçamento.
  *  - Sem quantidade, avalia-se na quantidade mínima do produto e a oferta diz
  *    isso — "a partir de", nunca um preço que pareça valer para qualquer volume.
  */
 import type { ProdutoIndexado, SubprodutoIndexado } from "./indice.js";
+import { ehSobDemanda } from "./sobDemanda.js";
 
 export type MotivoInelegivel =
   | "sem_estoque"
@@ -90,7 +92,7 @@ function precoNaFaixa(sub: SubprodutoIndexado, quantidade: number): number | nul
 }
 
 export function calcularOferta(
-  produto: Pick<ProdutoIndexado, "quantidade_minima" | "subprodutos">,
+  produto: Pick<ProdutoIndexado, "quantidade_minima" | "subprodutos"> & { id?: string },
   quantidadeInformada: number | undefined,
   orcamento: Orcamento = {}
 ): Oferta {
@@ -101,14 +103,15 @@ export function calcularOferta(
     detalhe: OfertaRecusada["detalhe"] = {}
   ): OfertaRecusada => ({ ok: false, motivo, quantidade, quantidade_informada: informada, detalhe });
 
-  const comEstoque = produto.subprodutos.filter((s) => s.estoque > 0);
+  const sobDemanda = produto.id !== undefined && ehSobDemanda(produto.id);
+  const comEstoque = sobDemanda ? produto.subprodutos : produto.subprodutos.filter((s) => s.estoque > 0);
   if (comEstoque.length === 0) return recusa("sem_estoque");
 
   if (quantidade < produto.quantidade_minima) {
     return recusa("abaixo_do_minimo", { minimo: produto.quantidade_minima });
   }
 
-  const cobrem = comEstoque.filter((s) => s.estoque >= quantidade);
+  const cobrem = sobDemanda ? comEstoque : comEstoque.filter((s) => s.estoque >= quantidade);
   if (cobrem.length === 0) {
     return recusa("estoque_insuficiente", {
       maior_estoque_de_uma_cor: Math.max(...comEstoque.map((s) => s.estoque)),

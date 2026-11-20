@@ -8,11 +8,14 @@ import type { OrderStage } from "@/lib/orders";
 import { api, useApi } from "@/lib/client/api";
 import { STAGES, STAGE_LABELS, customerStatus, formatDateTime, formatMoney, formatPhone, leadDisplayName, relativeTime } from "@/lib/types";
 import type { Lead, LeadEvent, Message, Stage } from "@/lib/types";
+import type { Etapa } from "@/lib/design";
+import { ROTULO_ETAPA } from "@/components/design/etapas";
 
 interface LeadDetail {
   lead: Lead;
   messages: Message[];
   events: LeadEvent[];
+  design_job: { id: string; stage: Etapa } | null;
 }
 
 type Tab = "conversa" | "ficha" | "historico";
@@ -96,6 +99,7 @@ export function LeadPanel({
         <AttentionBar lead={lead} onResolved={refresh} />
       )}
       <OrdersStrip lead={lead} />
+      <DesignStrip leadId={lead.id} job={data.design_job} onChanged={refresh} />
 
       <div className="px-5 pt-4">
         <Segmented
@@ -111,11 +115,51 @@ export function LeadPanel({
 
       {/* key por aba: cada aba abre do topo, sem herdar a rolagem da conversa */}
       <div key={tab} className="thin-scroll mt-2 min-h-0 flex-1 overflow-y-auto">
-        {tab === "conversa" && <Conversation messages={data.messages} />}
+        {tab === "conversa" && <Conversation leadId={lead.id} messages={data.messages} />}
         {tab === "ficha" && <LeadForm lead={lead} sellers={sellers} onSaved={refresh} />}
         {tab === "historico" && <History leadId={lead.id} events={data.events} onAdded={refresh} />}
       </div>
       {tab === "conversa" && <Composer lead={lead} connected={whatsappConnected} onSent={refresh} />}
+    </div>
+  );
+}
+
+/** Job de design aberto do lead, ou o botão que abre um (manda as imagens da conversa ao designer) */
+function DesignStrip({ leadId, job, onChanged }: { leadId: string; job: LeadDetail["design_job"]; onChanged: () => void }) {
+  const { me, base } = usePortal();
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  if (me.role === "DESIGNER") return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-outline-variant/30 px-5 py-2 text-[12px]">
+      {job ? (
+        <a href={`${base}/design/${job.id}`} className="flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-3 py-1 font-semibold text-violet-800">
+          <span className="material-symbols-outlined text-[15px]">palette</span>
+          Design: {ROTULO_ETAPA[job.stage]}
+        </a>
+      ) : (
+        <Button
+          variant="outline"
+          icon="palette"
+          loading={busy}
+          onClick={async () => {
+            setBusy(true);
+            setNote(null);
+            try {
+              const r = await api<{ aviso?: string }>(`/api/leads/${leadId}/design`, { method: "POST" });
+              setNote(r.aviso ?? "Enviado para o design.");
+              onChanged();
+            } catch (err) {
+              setNote((err as Error).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Enviar para design
+        </Button>
+      )}
+      {note && <span className="text-on-surface-variant">{note}</span>}
     </div>
   );
 }
@@ -285,9 +329,11 @@ function AttentionBar({ lead, onResolved }: { lead: Lead; onResolved: () => void
   );
 }
 
-function Conversation({ messages }: { messages: Message[] }) {
+function Conversation({ leadId, messages }: { leadId: string; messages: Message[] }) {
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [messages.length]);
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "end" });
+  }, [messages.length]);
   if (messages.length === 0) return <EmptyState icon="chat_bubble" title="Sem mensagens" text="Este lead ainda não conversou com a Lia." />;
 
   let lastDay = "";
@@ -312,7 +358,18 @@ function Conversation({ messages }: { messages: Message[] }) {
                     {m.author === "AGENTE" ? "Lia · agente" : m.sent_by_name ? `${m.sent_by_name} · pelo CRM` : "Equipe · pelo celular"}
                   </p>
                 )}
-                <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                {m.kind === "audio" && m.has_media ? (
+                  <>
+                    {/* preload none: abrir o lead não baixa todos os áudios */}
+                    <audio controls preload="none" aria-label="Áudio do cliente" src={`/api/leads/${leadId}/messages/${m.id}/audio`} className="max-w-full" />
+                    {m.transcription_status === "OK" && m.transcription && (
+                      <p className="mt-1 whitespace-pre-wrap break-words italic opacity-80">Transcrição: {m.transcription}</p>
+                    )}
+                    {m.transcription_status === "FALHOU" && <p className="mt-1 text-[12px] opacity-70">Transcrição falhou: ouça o áudio</p>}
+                  </>
+                ) : (
+                  <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                )}
                 <p className="mt-1 text-right text-[10px] opacity-50">{new Date(m.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p>
               </div>
             </div>

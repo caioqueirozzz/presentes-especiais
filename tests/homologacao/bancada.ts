@@ -6,6 +6,7 @@ import type { TurnResult } from "../../src/agent/runTurn.js";
 import { calcularTurnoId } from "../../src/contrato/turno.js";
 import type { Arquivo, RespostaMensagens } from "../../src/contrato/esquemas.js";
 import type { EstadoSistema } from "../../src/controle/estadoSistema.js";
+import { MemoriaConversas, type ArmazemConversas } from "../../src/conversas/armazem.js";
 import { RepositorioConversas } from "../../src/conversas/repositorio.js";
 import { MockBrindeMeClient } from "../../src/integrations/brindeme/mockClient.js";
 import { carregarBase } from "../../src/knowledge/base.js";
@@ -139,14 +140,14 @@ export interface Bancada {
   enviar(texto: string, opcoes?: { telefone?: string; arquivo?: Arquivo; id?: string }): Promise<RespostaMensagens>;
 }
 
-export async function montarBancada(opcoes: { tetoMs?: number; respostasPorHora?: number; repoDir?: string } = {}): Promise<Bancada> {
+export async function montarBancada(opcoes: { tetoMs?: number; respostasPorHora?: number; armazem?: ArmazemConversas } = {}): Promise<Bancada> {
   await usarIndiceDoMock();
   setOrderIndexStore(indiceDosMocks());
   const lacunas = new MemoryLacunaStore();
   setLacunaStore(lacunas);
   baseDeHomologacao();
 
-  const repo = new RepositorioConversas(opcoes.repoDir ?? mkdtempSync(join(tmpdir(), "homolog-conv-")));
+  const repo = new RepositorioConversas(opcoes.armazem ?? new MemoriaConversas());
   const client = new MockBrindeMeClient();
   const llm = new RoteiroLLM();
   const sistema: EstadoSistema = { suspenso: false };

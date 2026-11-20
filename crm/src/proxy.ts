@@ -8,7 +8,7 @@ import { SESSION_COOKIE, homeFor, verifySession } from "@/lib/auth/token";
  * validam a sessão no banco por conta própria.
  *
  *  /admin/*  → só ADMIN
- *  /app/*    → só COLABORADOR (o admin fica no painel dele)
+ *  /app/*    → COLABORADOR e DESIGNER (o admin fica no painel dele; o designer só no Design e na Conta)
  */
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -30,6 +30,7 @@ export async function proxy(request: NextRequest) {
     if (claims.pwd) return redirect("/trocar-senha");
     if (pathname.startsWith("/admin") && claims.role !== "ADMIN") return redirect("/app/inicio");
     if (pathname.startsWith("/app") && claims.role === "ADMIN") return redirect(pathname.replace(/^\/app/, "/admin"));
+    if (claims.role === "DESIGNER" && !/^\/app\/(design|conta)(\/|$)/.test(pathname)) return redirect("/app/design");
   }
 
   return NextResponse.next();

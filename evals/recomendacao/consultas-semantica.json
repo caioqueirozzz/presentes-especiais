@@ -1,0 +1,355 @@
+{
+  "_instrucoes": "40 consultas da medição da busca semântica (spec §8). As 30 primeiras vêm de pedidos.json; as 10 últimas, do dogfooding de 09/11 e de palavras ambíguas. tipo_produto é o que o modelo deve preencher quando o cliente nomeia o produto; vazio significa que ele não nomeou (o filtro por tipo não roda). armadilha é o regex do produto de OUTRO tipo que a busca lexical trazia junto: nenhum item do top-3 pode casar com ele. Rode: npm run avaliar:recomendacao -- --comparar",
+  "consultas": [
+    {
+      "id": "01",
+      "pedido": "Quero um brinde para 50 pessoas no Natal",
+      "consulta": "brinde",
+      "quantidade": 50,
+      "ocasiao": "natal",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "02",
+      "pedido": "Preciso de 100 canecas, até R$ 20 cada",
+      "consulta": "caneca",
+      "quantidade": 100,
+      "preco_max_unitario": 20,
+      "tipo_produto": "caneca",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "03",
+      "pedido": "200 squeezes para um evento esportivo, até R$ 15",
+      "consulta": "squeeze",
+      "quantidade": 200,
+      "preco_max_unitario": 15,
+      "ocasiao": "esportivo",
+      "tipo_produto": "squeeze",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "04",
+      "pedido": "Algo para presentear 60 professores",
+      "consulta": "algo para professores",
+      "quantidade": 60,
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "05",
+      "pedido": "30 cadernos, tenho R$ 600 no total",
+      "consulta": "caderno",
+      "quantidade": 30,
+      "orcamento_total": 600,
+      "tipo_produto": "caderno",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "06",
+      "pedido": "500 ecobags para uma feira, até R$ 6 cada",
+      "consulta": "ecobag",
+      "quantidade": 500,
+      "preco_max_unitario": 6,
+      "ocasiao": "eventos",
+      "tipo_produto": "ecobag",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "07",
+      "pedido": "Kit de boas-vindas para 15 novos colaboradores",
+      "consulta": "kit",
+      "quantidade": 15,
+      "ocasiao": "onboarding",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "08",
+      "pedido": "40 canecas térmicas",
+      "consulta": "caneca térmica",
+      "quantidade": 40,
+      "tipo_produto": "caneca",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "09",
+      "pedido": "80 garrafas, no máximo R$ 35 cada",
+      "consulta": "garrafa",
+      "quantidade": 80,
+      "preco_max_unitario": 35,
+      "tipo_produto": "garrafa",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "10",
+      "pedido": "Brinde para evento corporativo, 300 pessoas, até R$ 10",
+      "consulta": "brinde",
+      "quantidade": 300,
+      "preco_max_unitario": 10,
+      "ocasiao": "corporativo",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "11",
+      "pedido": "1000 canetas, até R$ 2 cada",
+      "consulta": "caneta",
+      "quantidade": 1000,
+      "preco_max_unitario": 2,
+      "tipo_produto": "caneta",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "12",
+      "pedido": "50 mochilas até R$ 60",
+      "consulta": "mochila",
+      "quantidade": 50,
+      "preco_max_unitario": 60,
+      "tipo_produto": "mochila",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "13",
+      "pedido": "Quero só 10 canecas",
+      "consulta": "caneca",
+      "quantidade": 10,
+      "tipo_produto": "caneca",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "14",
+      "pedido": "100 canecas, mas só tenho R$ 100 no total",
+      "consulta": "caneca",
+      "quantidade": 100,
+      "orcamento_total": 100,
+      "tipo_produto": "caneca",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "15",
+      "pedido": "2000 chaveiros até R$ 1,50",
+      "consulta": "chaveiro",
+      "quantidade": 2000,
+      "preco_max_unitario": 1.5,
+      "tipo_produto": "chaveiro",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "16",
+      "pedido": "Necessaire para o Dia das Mães, 40 unidades",
+      "consulta": "necessaire",
+      "quantidade": 40,
+      "ocasiao": "dia das mães",
+      "tipo_produto": "necessaire",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "17",
+      "pedido": "100 carregadores portáteis, até R$ 40",
+      "consulta": "power bank",
+      "quantidade": 100,
+      "preco_max_unitario": 40,
+      "tipo_produto": "power bank",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "18",
+      "pedido": "150 bonés para a equipe",
+      "consulta": "boné",
+      "quantidade": 150,
+      "tipo_produto": "boné",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "19",
+      "pedido": "Brinde sustentável para 200 clientes",
+      "consulta": "brinde sustentável",
+      "quantidade": 200,
+      "ocasiao": "sustentabilidade",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "20",
+      "pedido": "70 guarda-chuvas, até R$ 30",
+      "consulta": "guarda-chuva",
+      "quantidade": 70,
+      "preco_max_unitario": 30,
+      "tipo_produto": "guarda-chuva",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "21",
+      "pedido": "120 copos para a festa da empresa",
+      "consulta": "copo",
+      "quantidade": 120,
+      "ocasiao": "eventos",
+      "tipo_produto": "copo",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "22",
+      "pedido": "Kit de formatura com caderno e caneta, 80 unidades",
+      "consulta": "caderno",
+      "quantidade": 80,
+      "ocasiao": "formatura",
+      "tipo_produto": "caderno",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "23",
+      "pedido": "Agenda para dar aos clientes, 250 unidades",
+      "consulta": "agenda",
+      "quantidade": 250,
+      "tipo_produto": "agenda",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "24",
+      "pedido": "25 almofadas personalizadas",
+      "consulta": "almofada",
+      "quantidade": 25,
+      "tipo_produto": "almofada",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "25",
+      "pedido": "60 toalhas para academia, até R$ 25",
+      "consulta": "toalha",
+      "quantidade": 60,
+      "preco_max_unitario": 25,
+      "ocasiao": "esportivo",
+      "tipo_produto": "toalha",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "26",
+      "pedido": "100 camisetas para o evento",
+      "consulta": "camiseta",
+      "quantidade": 100,
+      "ocasiao": "eventos",
+      "tipo_produto": "camiseta",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "27",
+      "pedido": "Brinde baratinho, 1000 unidades, até R$ 3",
+      "consulta": "brinde",
+      "quantidade": 1000,
+      "preco_max_unitario": 3,
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "28",
+      "pedido": "Quero 5 carros elétricos de brinde",
+      "consulta": "carro elétrico",
+      "quantidade": 5,
+      "tipo_produto": "carro elétrico",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "29",
+      "pedido": "Presente executivo para 20 diretores, até R$ 150",
+      "consulta": "presente executivo",
+      "quantidade": 20,
+      "preco_max_unitario": 150,
+      "ocasiao": "executivo",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "30",
+      "pedido": "Dia dos Pais: 45 unidades, R$ 1.500 no total",
+      "consulta": "brinde",
+      "quantidade": 45,
+      "orcamento_total": 1500,
+      "ocasiao": "dia dos pais",
+      "origem": "pedidos.json"
+    },
+    {
+      "id": "31",
+      "pedido": "Quero 10 camisas dry fit personalizadas",
+      "consulta": "camisa dry fit",
+      "tipo_produto": "camiseta",
+      "quantidade": 10,
+      "armadilha": "porta.?lata",
+      "origem": "dogfooding-fase-0"
+    },
+    {
+      "id": "32",
+      "pedido": "Preciso de 100 camisas dry fit",
+      "consulta": "camisa dry fit",
+      "tipo_produto": "camiseta",
+      "quantidade": 100,
+      "armadilha": "porta.?lata",
+      "origem": "dogfooding-fase-0"
+    },
+    {
+      "id": "33",
+      "pedido": "Me mostra 50 canecas mágicas",
+      "consulta": "caneca mágica",
+      "tipo_produto": "caneca",
+      "quantidade": 50,
+      "armadilha": "escova|copo de vidro",
+      "origem": "dogfooding-fase-0"
+    },
+    {
+      "id": "34",
+      "pedido": "Quero 200 miniaturas de empilhadeira",
+      "consulta": "miniatura de empilhadeira",
+      "tipo_produto": "miniatura de empilhadeira",
+      "quantidade": 200,
+      "armadilha": "carro miniatura|fusca",
+      "origem": "dogfooding-fase-0"
+    },
+    {
+      "id": "35",
+      "pedido": "20 miniaturas de empilhadeira",
+      "consulta": "miniatura de empilhadeira",
+      "tipo_produto": "miniatura de empilhadeira",
+      "quantidade": 20,
+      "armadilha": "carro miniatura|fusca",
+      "origem": "dogfooding-fase-0"
+    },
+    {
+      "id": "36",
+      "pedido": "Caixa de som com microfone, 30 unidades",
+      "consulta": "caixa de som com microfone",
+      "tipo_produto": "caixa de som",
+      "quantidade": 30,
+      "armadilha": "microfone",
+      "origem": "dogfooding-fase-0"
+    },
+    {
+      "id": "37",
+      "pedido": "500 canetas plásticas",
+      "consulta": "caneta plástica",
+      "tipo_produto": "caneta",
+      "quantidade": 500,
+      "armadilha": "caneco|copo",
+      "origem": "dogfooding-fase-0"
+    },
+    {
+      "id": "38",
+      "pedido": "Quero 100 copos térmicos",
+      "consulta": "copo térmico",
+      "tipo_produto": "copo",
+      "quantidade": 100,
+      "armadilha": "garrafa térmica",
+      "origem": "dogfooding-fase-0"
+    },
+    {
+      "id": "39",
+      "pedido": "80 bolsas térmicas para delivery",
+      "consulta": "bolsa térmica",
+      "tipo_produto": "bolsa térmica",
+      "quantidade": 80,
+      "armadilha": "garrafa térmica|caneca térmica",
+      "origem": "dogfooding-fase-0"
+    },
+    {
+      "id": "40",
+      "pedido": "Me mostra a camisa dry fit",
+      "consulta": "camisa dry fit",
+      "tipo_produto": "camiseta",
+      "armadilha": "porta.?lata",
+      "origem": "dogfooding-fase-0"
+    }
+  ]
+}

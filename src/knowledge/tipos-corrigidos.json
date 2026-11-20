@@ -1,0 +1,4 @@
+{
+  "_comentario": "Correção manual de tipo, produto_id -> tipo. Vence o rótulo do modelo e vale no próximo carregamento, sem deploy. Use quando o rotulador errar o tipo de um produto (ver docs/superpowers/specs/2026-11-09-busca-semantica-design.md, 3.1).",
+  "tipos": {}
+}

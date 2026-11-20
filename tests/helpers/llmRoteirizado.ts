@@ -3,14 +3,16 @@ import type { LLMMessage, LLMProvider, LLMResponse } from "../../src/llm/types.j
 /** Devolve as respostas na ordem; um Error no roteiro é lançado. Guarda os messages de cada chamada. */
 export class ScriptedLLM implements LLMProvider {
   public seen: LLMMessage[][] = [];
+  public sistemas: string[] = [];
 
   constructor(
     private readonly script: Array<LLMResponse | Error> = [],
     private readonly atrasoMs = 0
   ) {}
 
-  async chat(params: { messages: LLMMessage[] }): Promise<LLMResponse> {
+  async chat(params: { messages: LLMMessage[]; system?: string }): Promise<LLMResponse> {
     this.seen.push(JSON.parse(JSON.stringify(params.messages)));
+    this.sistemas.push(params.system ?? "");
     if (this.atrasoMs) await new Promise((r) => setTimeout(r, this.atrasoMs));
     const proximo = this.script.shift() ?? endTurn("fim");
     if (proximo instanceof Error) throw proximo;

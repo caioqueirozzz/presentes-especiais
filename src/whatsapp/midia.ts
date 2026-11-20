@@ -40,7 +40,8 @@ export function salvarMidia(dirBase: string, telefone: string, id: string, midia
   const mime = midia.mime.split(";")[0].trim().toLowerCase();
   const ext = EXTENSOES_POR_MIME[mime];
   const idSeguro = id.replace(/[^A-Za-z0-9_-]/g, "_").slice(-60);
-  const nome = midia.nome?.trim() || `arquivo-${idSeguro.slice(-8)}${ext ? `.${ext}` : ""}`;
+  // O nome vem do remetente e vai para o marcador [ARQUIVO recebido: …]: sem colchete nem quebra de linha não forja outro marcador
+  const nome = midia.nome?.replace(/[[\]\r\n]/g, " ").trim() ||`arquivo-${idSeguro.slice(-8)}${ext ? `.${ext}` : ""}`;
   if (!ext) return { ok: false, nome, motivo: `formato ${mime} não aceito (aceitos: PNG, JPG, SVG, PDF)` };
 
   const dados = Buffer.from(midia.base64, "base64");

@@ -1,12 +1,13 @@
+import type { ItemResposta } from "../src/contrato/esquemas.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { MSG_AUDIO, MSG_INSTABILIDADE, Ponte, type OpcoesPonte } from "../src/whatsapp/ponte.js";
+import { MSG_AUDIO_FALHOU, MSG_INSTABILIDADE, Ponte, type OpcoesPonte } from "../src/whatsapp/ponte.js";
 import type { ResultadoLote } from "../src/whatsapp/agenteHttp.js";
 import type { MidiaBaixada } from "../src/whatsapp/canal.js";
 import { Envio } from "../src/whatsapp/envio.js";
-import { MemoriaEstadoPonte } from "../src/whatsapp/estadoPonte.js";
+import { estadoVazio, MemoriaEstadoPonte, type ArmazemPonte } from "../src/whatsapp/estadoPonte.js";
 import { AgenteEco } from "../src/duble/eco.js";
 import { WhatsAppFalso } from "./helpers/whatsappFalso.js";
 import { AgenteFalso } from "./helpers/agenteFalso.js";
@@ -116,7 +117,7 @@ describe("Ponte — regressões da revisão e da validação", () => {
 
   it("[F04] áudio cujo aviso não sai não é concluído nem marcado como lido", async () => {
     const { canal, ponte } = montar();
-    canal.falhar.set(MSG_AUDIO, 2);
+    canal.falhar.set(MSG_AUDIO_FALHOU, 2);
     const msg = canal.mensagem({ chatId: CHAT, texto: "", tipo: "audio" });
     const recebendo = ponte.receber(msg);
     await vi.runAllTimersAsync();
@@ -127,7 +128,7 @@ describe("Ponte — regressões da revisão e da validação", () => {
     const varrendo = ponte.varrer();
     await vi.runAllTimersAsync();
     await varrendo;
-    expect(canal.enviadas.map((e) => e.texto)).toEqual([MSG_AUDIO]);
+    expect(canal.enviadas.map((e) => e.texto)).toEqual([MSG_AUDIO_FALHOU]);
   });
 
   it("[F05a] figurinha depois de um lote que falhou não marca a conversa como lida", async () => {
@@ -228,7 +229,7 @@ describe("Ponte — regressões da revisão e da validação", () => {
     agente.enviarLote = async (p) => {
       agente.lotes.push(p);
       const resposta = await eco.processarLote(p);
-      return { tipo: "ok", resposta: { ...resposta, respostas: resposta.respostas.flatMap((r) => r.split("\n")) } };
+      return { tipo: "ok", resposta: { ...resposta, respostas: resposta.respostas.flatMap((r): ItemResposta[] => (typeof r === "string" ? r.split("\n") : [r])) } };
     };
     canal.falhar.set("parte2", 2);
     const antiga = canal.mensagem({ chatId: CHAT, texto: "parte1\nparte2" });
@@ -280,7 +281,7 @@ describe("Ponte — regressões da revisão e da validação", () => {
     const audio = ponte.receber(canal.mensagem({ chatId: CHAT, texto: "", tipo: "audio" }));
     await vi.runAllTimersAsync();
     await audio;
-    expect(canal.enviadas.filter((m) => m.chatId === CHAT).map((m) => m.texto)).toEqual([MSG_AUDIO]);
+    expect(canal.enviadas.filter((m) => m.chatId === CHAT).map((m) => m.texto)).toEqual([MSG_AUDIO_FALHOU]);
   });
 
   it("[F17] 409 seguido de chamada pendurada desiste em 120s desde o início do lote", async () => {
@@ -374,7 +375,7 @@ describe("Ponte — riscos abertos fechados na rodada 3", () => {
     );
     await vi.advanceTimersByTimeAsync(66_000);
     await recebendo;
-    expect(agente.lotes[0].mensagens[0].texto).toBe("[arquivo recusado: arquivo, não foi possível baixar]");
+    expect(agente.lotes[0].mensagens[0].texto).toBe("[arquivo recusado: arquivo, não chegou por falha nossa ao baixar; não é o formato]");
   });
 
   it("evento pendente de outra conversa não segura o lote desta", async () => {
@@ -409,9 +410,71 @@ describe("Ponte — riscos abertos fechados na rodada 3", () => {
     expect(canal.digitandoPor).toEqual([]);
   });
 
+  it("salvarAgora devolve a gravação, para a saída do processo esperar", async () => {
+    let gravou = false;
+    const armazem: ArmazemPonte = {
+      carregar: async () => estadoVazio(),
+      salvar: async () => {
+        await Promise.resolve();
+        gravou = true;
+      },
+    };
+    const { ponte } = montar({ armazem });
+    await ponte.salvarAgora();
+    expect(gravou).toBe(true);
+  });
+
+  it("falha numa gravação não trava a fila: a seguinte grava e a falha é registrada", async () => {
+    const gravados: string[][] = [];
+    let chamadas = 0;
+    const armazem: ArmazemPonte = {
+      carregar: async () => estadoVazio(),
+      salvar: async (e) => {
+        if (++chamadas === 1) throw Object.assign(new Error("caiu"), { code: "08006" });
+        gravados.push(e.concluidos);
+      },
+    };
+    const eventos: Record<string, unknown>[] = [];
+    const { ponte } = montar({ armazem }, (e) => eventos.push(e));
+    await ponte.salvarAgora();
+    await ponte.salvarAgora();
+    expect(gravados).toHaveLength(1);
+    expect(eventos).toEqual([{ type: "estado_nao_salvo", code: "08006", message: "caiu" }]);
+  });
+
+  it("gravações seguidas chegam ao armazém na ordem das chamadas", async () => {
+    const ordem: number[] = [];
+    let n = 0;
+    const armazem: ArmazemPonte = {
+      carregar: async () => estadoVazio(),
+      salvar: async (e) => {
+        const minha = e.avisosPendentes.length;
+        await new Promise((r) => setTimeout(r, minha === 0 ? 50 : 0));
+        ordem.push(minha);
+        n++;
+      },
+    };
+    const { ponte } = montar({ armazem, estadoInicial: estadoVazio() });
+    const p1 = ponte.salvarAgora();
+    (ponte as unknown as { avisosPendentes: string[] }).avisosPendentes.push("x");
+    const p2 = ponte.salvarAgora();
+    await vi.runAllTimersAsync();
+    await Promise.all([p1, p2]);
+    expect(ordem).toEqual([0, 1]);
+    expect(n).toBe(2);
+  });
+
+  it("logger que lança não deixa a gravação rejeitada", async () => {
+    const armazem: ArmazemPonte = { carregar: async () => estadoVazio(), salvar: async () => Promise.reject(new Error("x")) };
+    const { ponte } = montar({ armazem }, () => {
+      throw new Error("log quebrado");
+    });
+    await expect(ponte.salvarAgora()).resolves.toBeUndefined();
+  });
+
   describe("reinício da ponte", () => {
-    function reiniciar(armazem: MemoriaEstadoPonte) {
-      return montar({ armazem });
+    async function reiniciar(armazem: MemoriaEstadoPonte) {
+      return montar({ armazem, estadoInicial: await armazem.carregar() });
     }
 
     it("lote já entregue não volta ao agente e a conversa com o atendente continua quieta", async () => {
@@ -422,7 +485,8 @@ describe("Ponte — riscos abertos fechados na rodada 3", () => {
       await antes.ponte.receber(msg);
       await vi.runAllTimersAsync();
 
-      const depois = reiniciar(armazem);
+      await antes.ponte.salvarAgora();
+      const depois = await reiniciar(armazem);
       depois.canal.naoLidas = [{ chatId: CHAT, mensagens: [msg] }];
       await depois.ponte.varrer();
       await vi.runAllTimersAsync();
@@ -440,7 +504,8 @@ describe("Ponte — riscos abertos fechados na rodada 3", () => {
       await antes.ponte.receber(antes.canal.mensagem({ chatId: CHAT, texto: "assumi", deMim: true }));
       await vi.runAllTimersAsync();
 
-      const depois = reiniciar(armazem);
+      await antes.ponte.salvarAgora();
+      const depois = await reiniciar(armazem);
       await depois.ponte.varrer();
       expect(depois.agente.eventos.map((e) => e.tipo)).toEqual(["mensagem_atendente"]);
     });
@@ -453,7 +518,8 @@ describe("Ponte — riscos abertos fechados na rodada 3", () => {
       await antes.ponte.receber(antes.canal.mensagem({ chatId: CHAT, texto: "quero atendente" }));
       await vi.runAllTimersAsync();
 
-      const depois = reiniciar(armazem);
+      await antes.ponte.salvarAgora();
+      const depois = await reiniciar(armazem);
       await depois.ponte.varrer();
       await vi.runAllTimersAsync();
       expect(depois.canal.enviadas).toEqual([{ chatId: depois.canal.eu, texto: "resumo" }]);
@@ -474,7 +540,8 @@ describe("Ponte — riscos abertos fechados na rodada 3", () => {
       await vi.runAllTimersAsync();
       expect(antes.canal.enviadas.map((e) => e.texto)).toEqual(["parte 1"]);
 
-      const depois = reiniciar(armazem);
+      await antes.ponte.salvarAgora();
+      const depois = await reiniciar(armazem);
       depois.agente.padrao = { tipo: "ok", resposta: { respostas: ["parte 1", "parte 2"], modo: "ia" } };
       depois.canal.naoLidas = [{ chatId: CHAT, mensagens: [msg] }];
       await depois.ponte.varrer();
@@ -488,7 +555,8 @@ describe("Ponte — riscos abertos fechados na rodada 3", () => {
       await antes.ponte.receber(msg);
       await vi.runAllTimersAsync();
 
-      const depois = reiniciar(armazem);
+      await antes.ponte.salvarAgora();
+      const depois = await reiniciar(armazem);
       const nova = depois.canal.mensagem({ id: "depois-1", chatId: CHAT, texto: "e o prazo?" });
       depois.agente.padrao = { tipo: "ok", resposta: { respostas: ["parte 1", "parte 2", "prazo de 10 dias"], modo: "ia" } };
       depois.canal.naoLidas = [{ chatId: CHAT, mensagens: [msg, nova] }];
@@ -507,9 +575,11 @@ describe("Ponte — riscos abertos fechados na rodada 3", () => {
       // Cai logo depois da última parte, antes de a gravação adiada do estado acontecer.
       await vi.advanceTimersByTimeAsync(5_000);
       while (antes.canal.enviadas.length < 2) await vi.advanceTimersByTimeAsync(100);
-      const salvo = armazem.carregar();
+      // Só a gravação feita a cada parte (sem esperar o timer) chegou ao armazém.
+      await vi.advanceTimersByTimeAsync(0);
+      const salvo = await armazem.carregar();
 
-      const depois = reiniciar(new MemoriaEstadoPonte(salvo));
+      const depois = await reiniciar(new MemoriaEstadoPonte(salvo));
       depois.agente.padrao = { tipo: "ok", resposta: { respostas: ["parte 1", "parte 2"], modo: "ia" } };
       depois.canal.naoLidas = [{ chatId: CHAT, mensagens: [msg] }];
       await depois.ponte.varrer();

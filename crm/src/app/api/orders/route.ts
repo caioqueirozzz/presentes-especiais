@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { gatilhoArte } from "@/lib/design";
 import { isAdmin, isUuid, jsonError, readJson, requireAdmin, requireUser, serverError } from "@/lib/access";
 import { one, transaction, query } from "@/lib/db";
 import { ORDER_COLUMNS, isOrderStage, normalizeOrderPhone, orderDate, orderText, phoneVariants } from "@/lib/orders";
@@ -35,7 +36,8 @@ export async function GET(request: Request) {
        ORDER BY o.due_date ASC NULLS LAST, o.created_at ASC`,
       params
     );
-    return NextResponse.json({ orders });
+    // O colaborador não vê a observação interna da gestão (igual ao detalhe em orders/[id])
+    return NextResponse.json({ orders: isAdmin(guard.user) ? orders : orders.map((o) => ({ ...o, internal_note: null })) });
   } catch (err) {
     return serverError(err, "listar pedidos");
   }
@@ -83,6 +85,7 @@ export async function POST(request: Request) {
       await tx.query("INSERT INTO order_events (order_id, user_id, from_stage, to_stage) VALUES ($1, $2, NULL, $3)", [row.id, guard.user.id, stage]);
       return row.id;
     });
+    if (stage === "ARTE") await gatilhoArte({ leadId: lead?.id ?? null, orderId: id, atorId: guard.user.id });
     return NextResponse.json({ id }, { status: 201 });
   } catch (err) {
     return serverError(err, "cadastrar pedido");

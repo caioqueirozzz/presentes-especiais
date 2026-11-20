@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
 import { AgenteDefinitivo, MSG_FALHA, MSG_LIMITE } from "../src/api/agenteDefinitivo.js";
-import { RepositorioConversas } from "../src/conversas/repositorio.js";
+import { MemoriaConversas, type ArmazemConversas } from "../src/conversas/armazem.js";
+import { RepositorioConversas, type Conversa } from "../src/conversas/repositorio.js";
 import { TurnoEmAndamentoError } from "../src/contrato/agente.js";
 import { calcularTurnoId } from "../src/contrato/turno.js";
+import { Logger } from "../src/logging/logger.js";
 import { MockBrindeMeClient } from "../src/integrations/brindeme/mockClient.js";
 import type { BrindeMeClient } from "../src/integrations/brindeme/client.js";
 import { setBaseConhecimento, setLacunaStore } from "../src/tools/consultarConhecimento.js";
@@ -20,10 +19,10 @@ const T = "2026-10-14T12:00:00.000Z";
 
 function montar(
   llm: LLMProvider,
-  extra: { tetoMs?: number; respostasPorHora?: number; client?: BrindeMeClient; dir?: string } = {}
+  extra: { tetoMs?: number; respostasPorHora?: number; client?: BrindeMeClient; armazem?: ArmazemConversas } = {}
 ) {
-  const dir = extra.dir ?? mkdtempSync(join(tmpdir(), "conversas-"));
-  const repo = new RepositorioConversas(dir);
+  const armazem = extra.armazem ?? new MemoriaConversas();
+  const repo = new RepositorioConversas(armazem);
   const agente = new AgenteDefinitivo({
     repo,
     llm,
@@ -31,18 +30,18 @@ function montar(
     tetoMs: extra.tetoMs ?? 90_000,
     respostasPorHora: extra.respostasPorHora ?? 30,
   });
-  return { agente, repo, dir };
+  return { agente, repo, armazem };
 }
 
 /** Estimativa mostrada num turno anterior, à espera da confirmação do cliente. */
-function semearFichaPedido(dir: string): void {
-  const repo = new RepositorioConversas(dir);
-  const c = repo.carregar(TEL);
+async function semearFichaPedido(armazem: ArmazemConversas): Promise<void> {
+  const repo = new RepositorioConversas(armazem);
+  const c = await repo.carregar(TEL);
   c.estado.fichaPedido = {
     mensagemDoResumo: "resumo-de-um-turno-anterior",
     resumo: { tipo: "PJ", nome: "Empresa", email: "a@b.test", telefone: TEL, itens: [], total_estimado: 0, arte_refs: [] },
   };
-  repo.salvar(c);
+  await repo.salvar(c);
 }
 
 describe("AgenteDefinitivo", () => {
@@ -54,14 +53,60 @@ describe("AgenteDefinitivo", () => {
 
   it("lote repetido devolve a resposta guardada, inclusive depois de reiniciar", async () => {
     const llm = new ScriptedLLM([endTurn("Olá! **Bem-vindo**")]);
-    const { agente, dir } = montar(llm);
+    const { agente, armazem } = montar(llm);
     const p = pedido(TEL, ["r1"]);
     const a = await agente.processarLote(p);
     expect(a).toEqual({ respostas: ["Olá! *Bem-vindo*"], modo: "ia" });
     expect(await agente.processarLote(p)).toEqual(a);
-    const reiniciado = montar(llm, { dir }).agente;
+    const reiniciado = montar(llm, { armazem }).agente;
     expect(await reiniciado.processarLote(p)).toEqual(a);
     expect(llm.seen).toHaveLength(1);
+  });
+
+  it("banco fora na gravação final: o turno devolve a resposta e não conta como falha do modelo", async () => {
+    class BancoCaido extends MemoriaConversas {
+      caido = false;
+      override async gravar(t: string, doc: unknown): Promise<void> {
+        if (this.caido) throw Object.assign(new Error("connection terminated"), { code: "57P01" });
+        return super.gravar(t, doc);
+      }
+    }
+    const armazem = new BancoCaido();
+    const logs: Array<Record<string, unknown>> = [];
+    const espia = vi.spyOn(Logger.prototype, "log").mockImplementation((e) => void logs.push(e as Record<string, unknown>));
+    const llm = new ScriptedLLM([endTurn("Oi, tudo bem?")]);
+    const { agente, repo } = montar(llm, { armazem });
+    await repo.carregar(TEL);
+    armazem.caido = true;
+
+    const r = await agente.processarLote(pedido(TEL, ["r1"], "meu segredo do cliente"));
+    espia.mockRestore();
+
+    expect(r.respostas).toEqual(["Oi, tudo bem?"]);
+    // O histórico em memória (o que o próximo turno vê) guarda a pergunta e a resposta.
+    const c = (agente as unknown as { conversas: Map<string, { conversa: Conversa }> }).conversas.get(TEL)!.conversa;
+    expect(c.estado.historico.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(c.falhasPorTurno).toEqual({});
+    const aviso = logs.find((l) => l.motivo === "conversa_nao_salva");
+    expect(aviso).toMatchObject({ code: "57P01", message: "connection terminated" });
+    expect(JSON.stringify(aviso)).not.toContain("meu segredo do cliente");
+    expect(logs.some((l) => String(l.motivo).startsWith("falha_no_turno"))).toBe(false);
+  });
+
+  it("primeira carga simultânea da mesma conversa usa um objeto só", async () => {
+    const lento = new MemoriaConversas();
+    const lerRapido = lento.ler.bind(lento);
+    lento.ler = async (t) => {
+      const doc = await lerRapido(t);
+      await new Promise((r) => setTimeout(r, 20));
+      return doc;
+    };
+    const { agente, repo } = montar(new ScriptedLLM(), { armazem: lento });
+    await Promise.all([
+      agente.processarEvento({ tipo: "mensagem_atendente", telefone: TEL, id: "a1", timestamp: T, texto: "um" }),
+      agente.processarEvento({ tipo: "mensagem_atendente", telefone: TEL, id: "a2", timestamp: T, texto: "dois" }),
+    ]);
+    expect((await repo.carregar(TEL)).idsVistos).toEqual(["a1", "a2"]);
   });
 
   it("outro lote da mesma conversa com turno rodando → TurnoEmAndamentoError", async () => {
@@ -87,7 +132,7 @@ describe("AgenteDefinitivo", () => {
     await agente.processarEvento({ tipo: "mensagem_atendente", telefone: TEL, id: "at1", texto: "assumi", timestamp: T });
     expect(await agente.processarLote(pedido(TEL, ["h1"], "cadê meu pedido?"))).toEqual({ respostas: [], modo: "humano" });
     expect(llm.seen).toHaveLength(0);
-    expect(repo.carregar(TEL).estado.historico.map((m) => m.content)).toEqual(["[Atendente]: assumi", "cadê meu pedido?"]);
+    expect((await repo.carregar(TEL)).estado.historico.map((m) => m.content)).toEqual(["[Atendente]: assumi", "cadê meu pedido?"]);
   });
 
   it("falha do Claude desfaz o turno; na 2ª falha do mesmo lote transfere", async () => {
@@ -96,7 +141,7 @@ describe("AgenteDefinitivo", () => {
     const p = pedido(TEL, ["f1"], "oi");
 
     await expect(agente.processarLote(p)).rejects.toThrow("overloaded");
-    const depois = repo.carregar(TEL);
+    const depois = await repo.carregar(TEL);
     expect(depois.estado.historico).toEqual([]);
     expect(depois.idsVistos).toEqual([]);
 
@@ -116,21 +161,21 @@ describe("AgenteDefinitivo", () => {
     await expect(agente.processarLote(p)).rejects.toThrow();
     await agente.processarLote(p);
 
-    const c = repo.carregar(TEL);
+    const c = await repo.carregar(TEL);
     expect(c.estado.arquivosRecebidos).toHaveLength(1);
     expect(c.estado.historico.filter((m) => m.role === "user")).toHaveLength(1);
   });
 
   it("teto de tempo: cancela, transfere pelo sistema e a estimativa pendente chega ao atendente", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "conversas-"));
-    semearFichaPedido(dir);
+    const armazem = new MemoriaConversas();
+    await semearFichaPedido(armazem);
     const lento: LLMProvider = {
       async chat(): Promise<LLMResponse> {
         await new Promise((r) => setTimeout(r, 100));
         return toolUse("transferir_humano", { motivo: "orcamento_para_emitir", prioridade: "normal" });
       },
     };
-    const { agente } = montar(lento, { tetoMs: 20, dir });
+    const { agente } = montar(lento, { tetoMs: 20, armazem });
 
     const r = await agente.processarLote(pedido(TEL, ["t1"], "pode enviar"));
 
@@ -140,8 +185,8 @@ describe("AgenteDefinitivo", () => {
   });
 
   it("o estado vai para o disco logo depois da transferência com a estimativa, antes do turno acabar", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "conversas-"));
-    semearFichaPedido(dir);
+    const armazem = new MemoriaConversas();
+    await semearFichaPedido(armazem);
     let derrubar: ((e: Error) => void) | undefined;
     const llm: LLMProvider = {
       chat: vi
@@ -149,11 +194,11 @@ describe("AgenteDefinitivo", () => {
         .mockResolvedValueOnce(toolUse("transferir_humano", { motivo: "orcamento_para_emitir", prioridade: "normal" }))
         .mockImplementationOnce(() => new Promise<LLMResponse>((_, rej) => (derrubar = rej))),
     };
-    const { agente } = montar(llm, { dir });
+    const { agente } = montar(llm, { armazem });
 
     const turno = agente.processarLote(pedido(TEL, ["o1"], "pode enviar"));
     await vi.waitFor(() => expect(derrubar).toBeDefined());
-    expect(new RepositorioConversas(dir).carregar(TEL).estado.modo).toBe("humano");
+    expect((await new RepositorioConversas(armazem).carregar(TEL)).estado.modo).toBe("humano");
 
     // Com a transferência já feita, a falha seguinte do modelo conclui pela transferência.
     derrubar!(new Error("processo caiu"));
@@ -188,7 +233,7 @@ describe("AgenteDefinitivo", () => {
     await agente.processarEvento(ev);
     await agente.processarEvento(ev);
     expect(await agente.processarEvento({ tipo: "devolver", telefone: TEL, nota: "pagou" })).toEqual({ modo: "ia" });
-    const c = repo.carregar(TEL);
+    const c = await repo.carregar(TEL);
     expect(c.estado.historico.map((m) => m.content)).toEqual([
       "[Atendente]: assumi",
       '[Atendente devolveu o atendimento à IA com a nota: "pagou"]',
@@ -203,7 +248,7 @@ describe("AgenteDefinitivo", () => {
     await agente.processarEvento({ tipo: "mensagem_atendente", telefone: TEL, id: "at2", texto: "eu assumo", timestamp: T });
     const r = await turno;
     expect(r.modo).toBe("humano");
-    expect(repo.carregar(TEL).estado.modo).toBe("humano");
+    expect((await repo.carregar(TEL)).estado.modo).toBe("humano");
   });
 
   it("transferência pela ferramenta: aviso legível com a pergunta sem resposta", async () => {
@@ -224,8 +269,8 @@ describe("AgenteDefinitivo", () => {
     const { agente, repo } = montar(llm);
     const arquivo = { caminho: "C:/artes/abc.png", mime: "image/png", bytes: 2_048, nome: "logo.png" };
     await agente.processarLote({ turnoId: calcularTurnoId(["f9"]), telefone: TEL, mensagens: [{ id: "f9", timestamp: T, texto: "", arquivo }] });
-    const c = repo.carregar(TEL);
-    expect(c.estado.arquivosRecebidos).toEqual([{ nome: "logo.png", caminho: "C:/artes/abc.png", mime: "image/png", bytes: 2_048 }]);
+    const c = await repo.carregar(TEL);
+    expect(c.estado.arquivosRecebidos).toEqual([{ nome: "logo.png", caminho: "C:/artes/abc.png", mime: "image/png", bytes: 2_048, recebidoEm: T }]);
     expect(c.estado.artes[0].arquivo).toBe("C:/artes/abc.png");
   });
 });

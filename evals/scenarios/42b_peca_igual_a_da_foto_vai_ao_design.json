@@ -1,0 +1,17 @@
+{
+  "id": "42b_peca_igual_a_da_foto_vai_ao_design",
+  "descricao": "Frase do dogfooding: camiseta igual à da foto com a logo da empresa vai ao design, não ao registrar_arte",
+  "mensagens": [
+    "[ARQUIVO recebido: arquivo-468DF3C6.jpg (image/jpeg, 36 KB)]\nquero uma camiseta igual essa da foto, sendo que com a logo da minha empresa nela"
+  ],
+  "expectativas": [
+    {
+      "tipo": "chamou_ferramenta",
+      "ferramenta": "encaminhar_design"
+    },
+    {
+      "tipo": "nao_chamou_ferramenta",
+      "ferramenta": "registrar_arte"
+    }
+  ]
+}

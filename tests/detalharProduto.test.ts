@@ -1,7 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { detalharProdutoHandler } from "../src/tools/detalharProduto.js";
 import { MockBrindeMeClient } from "../src/integrations/brindeme/mockClient.js";
 import { createInitialState } from "../src/agent/state.js";
+import { setSobDemanda } from "../src/catalogo/sobDemanda.js";
+import { reais } from "../src/tools/prepararOrcamento.js";
 import { isFalhaApi } from "../src/integrations/brindeme/errors.js";
 
 describe("detalhar_produto com id que não existe (eval 06)", () => {
@@ -53,5 +55,65 @@ describe("produtos detalhados guardados para o turno seguinte", () => {
       await detalharProdutoHandler({ produto_id: id }, state, client);
     }
     expect(state.produtosDetalhados?.map((p) => p.id)).toEqual(["prod-004", "prod-001", "prod-003"]);
+  });
+});
+
+describe("detalhar_produto com o preço exato do site", () => {
+  afterEach(() => setSobDemanda(null));
+
+  it("com quantidade: cota só as cores que cobrem a quantidade e manda um cartão", async () => {
+    const client = new MockBrindeMeClient();
+    const state = createInitialState("5583999990000");
+    const r = (await detalharProdutoHandler({ produto_id: "prod-003", quantidade: 100 }, state, client)) as {
+      subprodutos_ativos: Array<{ cor: string; preco_para_quantidade: number | null }>;
+      cartoes: Array<{ legenda: string; imagem_url: string | null }>;
+      preco_para_quantidade_a_partir_de: number | null;
+    };
+    const porCor = Object.fromEntries(r.subprodutos_ativos.map((s) => [s.cor, s.preco_para_quantidade]));
+    expect(porCor).toEqual({ Preta: 52, Branca: null });
+    expect(r.preco_para_quantidade_a_partir_de).toBe(52);
+    expect(r.cartoes).toHaveLength(1);
+    expect(r.cartoes[0].legenda).toBe(
+      ["*Garrafa Térmica Personalizada*", "Cores: Preta", `${reais(52)}/un para 100 un.`, `A partir de 200 un.: ${reais(46)}/un`].join("\n")
+    );
+    expect(state.cotacoes?.["sub-003-preta:100"]).toMatchObject({ centavos: 5200 });
+  });
+
+  it("sem quantidade: nenhuma tabela e nenhum preço; o cartão sai só com nome e cores", async () => {
+    const r = (await detalharProdutoHandler({ produto_id: "prod-001" }, createInitialState("5583999990000"), new MockBrindeMeClient())) as Record<string, unknown> & {
+      subprodutos_ativos: Array<Record<string, unknown>>;
+      cartoes: Array<{ legenda: string }>;
+    };
+    expect(r.tabela_precos).toBeUndefined();
+    expect(r.precos_variam_por_cor).toBeUndefined();
+    expect(r.subprodutos_ativos.every((s) => s.tabela_precos === undefined && s.sku === undefined && s.preco_para_quantidade === null)).toBe(true);
+    expect(r.preco_para_quantidade_a_partir_de).toBeNull();
+    expect(r.cartoes[0].legenda).not.toMatch(/R\$/);
+  });
+
+  it("Foco da revisão 5: abaixo do mínimo não cota nem passa preço", async () => {
+    const client = new MockBrindeMeClient();
+    const espiao = vi.spyOn(client, "precoVenda");
+    const r = (await detalharProdutoHandler({ produto_id: "prod-001", quantidade: 5 }, createInitialState("5583999990000"), client)) as {
+      preco_para_quantidade_a_partir_de: number | null;
+      min_quantity: number;
+    };
+    expect(espiao).not.toHaveBeenCalled();
+    expect(r.preco_para_quantidade_a_partir_de).toBeNull();
+    expect(r.min_quantity).toBe(25);
+    expect((r as { aviso?: string }).aviso).toMatch(/mínimo.*25/);
+  });
+
+  it("nenhuma cor cobre a quantidade: aviso de estoque oferecendo o humano; sob demanda ignora o estoque", async () => {
+    const client = new MockBrindeMeClient();
+    const semEstoque = (await detalharProdutoHandler({ produto_id: "prod-006", quantidade: 1500 }, createInitialState("5583999990000"), client)) as { aviso_estoque?: string };
+    expect(semEstoque.aviso_estoque).toMatch(/não tem no estoque/);
+    setSobDemanda(["prod-006"]);
+    const sobDemanda = (await detalharProdutoHandler({ produto_id: "prod-006", quantidade: 1500 }, createInitialState("5583999990000"), client)) as {
+      aviso_estoque?: string;
+      cores_que_atendem_quantidade: string[];
+    };
+    expect(sobDemanda.aviso_estoque).toBeUndefined();
+    expect(sobDemanda.cores_que_atendem_quantidade).toEqual(["Cristal", "Colorido"]);
   });
 });
