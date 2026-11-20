@@ -1,5 +1,5 @@
 import { jsonError } from "@/lib/access";
-import { MIME, armazem, chaveSegura, conferirAssinatura, detectarTipo } from "@/lib/arquivos";
+import { MIME, MIME_AUDIO, armazem, chaveSegura, conferirAssinatura, detectarAudio, detectarTipo } from "@/lib/arquivos";
 
 /**
  * Arquivo do modo disco. Vale só pela assinatura com validade (D9 da spec): quem baixa o mockup
@@ -18,14 +18,31 @@ export async function GET(request: Request) {
     return jsonError("Arquivo não encontrado.", 404);
   }
   const tipo = detectarTipo(bytes);
-  if (!tipo) return jsonError("Arquivo inválido.", 415);
+  const audio = tipo ? null : detectarAudio(bytes);
+  if (!tipo && !audio) return jsonError("Arquivo inválido.", 415);
   const headers: Record<string, string> = {
-    "Content-Type": MIME[tipo],
+    "Content-Type": tipo ? MIME[tipo] : MIME_AUDIO[audio!],
     "X-Content-Type-Options": "nosniff",
     "Cache-Control": "private, max-age=600",
+    "Accept-Ranges": "bytes",
   };
   // SVG pode carregar script: nunca inline
   if (tipo === "svg" || tipo === "pdf") headers["Content-Disposition"] = `attachment; filename="${chave.split("/").pop()}"`;
   if (tipo === "svg") headers["Content-Security-Policy"] = "sandbox";
+
+  // O <audio> pede pedaços (Range) para avançar; sem 206 o player não pula. Range malformado: arquivo inteiro
+  const faixa = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get("range") ?? "");
+  if (faixa && (faixa[1] || faixa[2])) {
+    const total = bytes.length;
+    const inicio = faixa[1] ? Number(faixa[1]) : Math.max(0, total - Number(faixa[2]));
+    const fim = faixa[1] && faixa[2] ? Math.min(Number(faixa[2]), total - 1) : total - 1;
+    if (inicio >= total || inicio > fim) {
+      return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${total}` } });
+    }
+    return new Response(new Uint8Array(bytes.subarray(inicio, fim + 1)), {
+      status: 206,
+      headers: { ...headers, "Content-Range": `bytes ${inicio}-${fim}/${total}` },
+    });
+  }
   return new Response(new Uint8Array(bytes), { headers });
 }

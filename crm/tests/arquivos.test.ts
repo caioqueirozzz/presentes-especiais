@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { armazem, assinar, conferirAssinatura, detectarTipo } from "@/lib/arquivos";
+import { armazem, assinar, chaveSegura, conferirAssinatura, detectarAudio, detectarTipo } from "@/lib/arquivos";
 
 const b = (...x: number[]) => Uint8Array.from(x);
 const txt = (s: string) => new TextEncoder().encode(s);
@@ -57,5 +57,25 @@ describe("armazém em disco", () => {
   it("url temporária aponta para a rota assinada", async () => {
     const url = await armazem().urlTemporaria("design/j1/original-1.png");
     expect(url).toMatch(/^\/api\/design\/arquivo\?chave=design%2Fj1%2Foriginal-1\.png&exp=\d+&sig=/);
+  });
+});
+
+describe("detectarAudio", () => {
+  const b = (...partes: Array<string | number[]>) => Buffer.concat(partes.map((p) => (typeof p === "string" ? Buffer.from(p, "latin1") : Buffer.from(p))));
+  it("reconhece ogg, mp3 (ID3 e frame sync) e m4a pelos primeiros bytes", () => {
+    expect(detectarAudio(b("OggS", [0, 0, 0, 0]))).toBe("ogg");
+    expect(detectarAudio(b("ID3", [3, 0, 0]))).toBe("mp3");
+    expect(detectarAudio(b([0xff, 0xfb, 0x90, 0x00]))).toBe("mp3");
+    expect(detectarAudio(b([0, 0, 0, 0x20], "ftypM4A "))).toBe("m4a");
+  });
+  it("PNG e JPEG não são áudio, e áudio não é imagem para o design", () => {
+    expect(detectarAudio(b([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]))).toBeNull();
+    expect(detectarAudio(b([0xff, 0xd8, 0xff, 0xe0]))).toBeNull();
+    expect(detectarTipo(b("OggS", [0, 0, 0, 0]))).toBeNull();
+  });
+  it("chaveSegura aceita audios/ e continua recusando ..", () => {
+    expect(chaveSegura("audios/lead/msg.ogg")).toBe(true);
+    expect(chaveSegura("audios/../x")).toBe(false);
+    expect(chaveSegura("outra/x.ogg")).toBe(false);
   });
 });

@@ -92,6 +92,10 @@ export interface Message {
   sent_at: string;
   /** texto | midia | audio | nao_suportada */
   kind?: string;
+  /** Só no áudio do cliente (Fase 4). A chave do arquivo não vai ao navegador. */
+  transcription?: string | null;
+  transcription_status?: "OK" | "FALHOU" | "NAO_TRANSCRITO" | null;
+  has_media?: boolean;
 }
 
 export interface LeadEvent {

@@ -18,7 +18,8 @@ export async function GET(_request: Request, { params }: Context) {
     if (!lead) return jsonError("Lead não encontrado.", 404);
     const [messages, events] = await Promise.all([
       query<Message>(
-        `SELECT m.id, m.author, u.name AS sent_by_name, m.body, m.sent_at, m.kind
+        `SELECT m.id, m.author, u.name AS sent_by_name, m.body, m.sent_at, m.kind,
+                m.transcription, m.transcription_status, (m.media_key IS NOT NULL) AS has_media
          FROM messages m LEFT JOIN users u ON u.id = m.sent_by WHERE m.lead_id = $1 ORDER BY m.sent_at ASC LIMIT 500`,
         [id]
       ),

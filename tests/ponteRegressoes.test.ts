@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { MSG_AUDIO, MSG_INSTABILIDADE, Ponte, type OpcoesPonte } from "../src/whatsapp/ponte.js";
+import { MSG_AUDIO_FALHOU, MSG_INSTABILIDADE, Ponte, type OpcoesPonte } from "../src/whatsapp/ponte.js";
 import type { ResultadoLote } from "../src/whatsapp/agenteHttp.js";
 import type { MidiaBaixada } from "../src/whatsapp/canal.js";
 import { Envio } from "../src/whatsapp/envio.js";
@@ -117,7 +117,7 @@ describe("Ponte — regressões da revisão e da validação", () => {
 
   it("[F04] áudio cujo aviso não sai não é concluído nem marcado como lido", async () => {
     const { canal, ponte } = montar();
-    canal.falhar.set(MSG_AUDIO, 2);
+    canal.falhar.set(MSG_AUDIO_FALHOU, 2);
     const msg = canal.mensagem({ chatId: CHAT, texto: "", tipo: "audio" });
     const recebendo = ponte.receber(msg);
     await vi.runAllTimersAsync();
@@ -128,7 +128,7 @@ describe("Ponte — regressões da revisão e da validação", () => {
     const varrendo = ponte.varrer();
     await vi.runAllTimersAsync();
     await varrendo;
-    expect(canal.enviadas.map((e) => e.texto)).toEqual([MSG_AUDIO]);
+    expect(canal.enviadas.map((e) => e.texto)).toEqual([MSG_AUDIO_FALHOU]);
   });
 
   it("[F05a] figurinha depois de um lote que falhou não marca a conversa como lida", async () => {
@@ -281,7 +281,7 @@ describe("Ponte — regressões da revisão e da validação", () => {
     const audio = ponte.receber(canal.mensagem({ chatId: CHAT, texto: "", tipo: "audio" }));
     await vi.runAllTimersAsync();
     await audio;
-    expect(canal.enviadas.filter((m) => m.chatId === CHAT).map((m) => m.texto)).toEqual([MSG_AUDIO]);
+    expect(canal.enviadas.filter((m) => m.chatId === CHAT).map((m) => m.texto)).toEqual([MSG_AUDIO_FALHOU]);
   });
 
   it("[F17] 409 seguido de chamada pendurada desiste em 120s desde o início do lote", async () => {

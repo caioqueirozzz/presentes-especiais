@@ -1,5 +1,5 @@
 import type { LogPonte } from "./log.js";
-import type { MensagemObservada, ObservadorPonte } from "./ponte.js";
+import type { MensagemObservada, MidiaObservada, ObservadorPonte } from "./ponte.js";
 
 /*
  * Envia ao CRM, em tempo real, cada mensagem da conversa e o estado da conversa que o agente gravou.
@@ -14,6 +14,7 @@ const ATRASO_CONVERSA_MS = 1_500;
 
 type Item =
   | { rota: "mensagens"; corpo: MensagemObservada & { nome?: string } }
+  | { rota: "midias"; corpo: MidiaObservada }
   | { rota: "conversas"; telefone: string };
 
 export class ObservadorCrm implements ObservadorPonte {
@@ -34,6 +35,14 @@ export class ObservadorCrm implements ObservadorPonte {
 
   mensagem(m: MensagemObservada): void {
     this.enfileirar({ rota: "mensagens", corpo: m });
+  }
+
+  /**
+   * shortcut: os bytes do áudio ficam na memória da fila até o CRM aceitar; se a ponte reiniciar com o CRM
+   * fora, o áudio se perde (a transcrição já foi para a Lia). Trocar por fila em disco quando a ponte for para a nuvem.
+   */
+  midia(m: MidiaObservada): void {
+    this.enfileirar({ rota: "midias", corpo: m });
   }
 
   conversaAtualizada(telefone: string): void {

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { alertaAgenteFora, MSG_AUDIO, MSG_INSTABILIDADE, Ponte, type OpcoesPonte } from "../src/whatsapp/ponte.js";
+import { alertaAgenteFora, MSG_AUDIO_FALHOU, MSG_INSTABILIDADE, Ponte, type OpcoesPonte } from "../src/whatsapp/ponte.js";
 import type { ResultadoLote } from "../src/whatsapp/agenteHttp.js";
 import { LIMITE_TEXTO } from "../src/contrato/esquemas.js";
 import { WhatsAppFalso } from "./helpers/whatsappFalso.js";
@@ -226,12 +226,12 @@ describe("Ponte", () => {
 
   describe("tipos de mensagem", () => {
     // A resposta ao áudio espera o "digitando" (timer): avance o relógio antes de aguardar o receber.
-    it("áudio: resposta fixa, não vai ao agente, marca como lida", async () => {
+    it("áudio que não baixa: pede o texto, não vai ao agente, marca como lida", async () => {
       const { canal, agente, ponte } = montar();
       const recebendo = ponte.receber(canal.mensagem({ chatId: CLIENTE, texto: "", tipo: "audio" }));
       await vi.runAllTimersAsync();
       await recebendo;
-      expect(canal.enviadas).toEqual([{ chatId: CLIENTE, texto: MSG_AUDIO }]);
+      expect(canal.enviadas).toEqual([{ chatId: CLIENTE, texto: MSG_AUDIO_FALHOU }]);
       expect(agente.lotes).toEqual([]);
       expect(canal.lidas).toEqual([CLIENTE]);
     });
@@ -243,7 +243,7 @@ describe("Ponte", () => {
       // "digitando" do aviso de áudio leva 2,55s; o lote só fecha aos 5s.
       await vi.advanceTimersByTimeAsync(4_000);
       await recebendo;
-      expect(canal.enviadas).toEqual([{ chatId: CLIENTE, texto: MSG_AUDIO }]);
+      expect(canal.enviadas).toEqual([{ chatId: CLIENTE, texto: MSG_AUDIO_FALHOU }]);
       expect(canal.lidas).toEqual([]);
       await vi.runAllTimersAsync();
       expect(canal.lidas).toEqual([CLIENTE]);

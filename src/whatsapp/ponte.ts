@@ -17,6 +17,7 @@ import type { LogPonte } from "./log.js";
 import { salvarMidia, TAMANHO_MAXIMO_BYTES } from "./midia.js";
 import { iaAtende, type ConfigLia } from "./modoLia.js";
 import { normalizarTelefone } from "./telefone.js";
+import type { Transcritor } from "./transcricao.js";
 
 const mesmaParte = (a: ItemResposta | undefined, b: ItemResposta) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -30,7 +31,7 @@ const SALVAR_APOS_MS = 300;
 const CONCLUIDOS_GUARDADOS = 2_000;
 const ENTREGAS_PARCIAIS_GUARDADAS = 200;
 
-export const MSG_AUDIO = "Ainda não consigo ouvir áudios por aqui 🙏 Pode me mandar por escrito?";
+export const MSG_AUDIO_FALHOU = "Não consegui ouvir seu áudio direito 🙏 Pode me mandar por escrito?";
 export const MSG_INSTABILIDADE = "Estamos com uma instabilidade agora, mas já te respondemos por aqui. 🙏";
 const RECUSA_VIDEO = "[arquivo recusado: vídeo, formato não aceito (aceitos: PNG, JPG, SVG, PDF)]";
 
@@ -50,11 +51,23 @@ export interface MensagemObservada {
   timestamp: string;
 }
 
+/** O áudio do cliente, com o resultado da transcrição, para o CRM guardar e tocar. */
+export interface MidiaObservada {
+  id: string;
+  telefone: string;
+  mime: string;
+  base64: string;
+  transcricao: string | null;
+  status: "OK" | "FALHOU" | "NAO_TRANSCRITO";
+}
+
 /** Quem acompanha a ponte de fora (o CRM). Chamadas sem esperar: a ponte nunca trava por causa dele. */
 export interface ObservadorPonte {
   mensagem(m: MensagemObservada): void;
   /** O agente terminou (ou desistiu de) um lote desta conversa: o estado dela pode ter mudado. */
   conversaAtualizada(telefone: string): void;
+  /** O áudio de uma mensagem já observada; chega depois dela. */
+  midia?(m: MidiaObservada): void;
 }
 
 export interface OpcoesPonte {
@@ -68,6 +81,8 @@ export interface OpcoesPonte {
   /** Estado lido do armazém antes de montar a ponte: o construtor não espera o banco. */
   estadoInicial?: EstadoPonte;
   observador?: ObservadorPonte;
+  /** Sem transcritor, todo áudio com a IA é tratado como falha de transcrição. */
+  transcritor?: Transcritor;
 }
 
 /** entregue: tudo saiu · vazio: o agente não respondeu nada · descartado: o atendente assumiu · pendente: repetir depois */
@@ -103,6 +118,7 @@ export class Ponte {
   private readonly atendimento: Atendimento;
   private readonly armazem: ArmazemPonte;
   private readonly concluidos = new ConjuntoLimitado(5_000);
+  private readonly audiosObservados = new ConjuntoLimitado(2_000);
   /** Ids sendo tratados fora da fila (aviso de áudio): a outra via que trouxer o mesmo id desiste. */
   private readonly reservados = new Set<string>();
   /** Pedidos que falharam ou não terminaram de sair, na ordem; voltam antes de qualquer lote novo da conversa. */
@@ -247,14 +263,13 @@ export class Ponte {
 
   private async receberDoCliente(m: MensagemRecebida): Promise<void> {
     if (!m.direta || !m.telefone || this.concluidos.has(m.id) || this.reservados.has(m.id)) return;
-    if (!this.iaAtende(m.telefone)) return;
     const telefone = m.telefone;
+    if (m.tipo === "audio") return this.receberAudio(telefone, m);
+    if (!this.iaAtende(telefone)) return;
 
-    if (m.tipo === "audio" || m.tipo === "ignorada") {
+    if (m.tipo === "ignorada") {
       this.reservados.add(m.id);
       try {
-        const comIa = this.atendimento.modo(telefone) === "ia";
-        if (m.tipo === "audio" && comIa && !(await this.envio.paraCliente(telefone, m.chatId, MSG_AUDIO))) return;
         this.concluir([m.id]);
         if (this.podeMarcarLida(telefone, false)) await this.marcarComoLida(m.chatId);
       } finally {
@@ -275,18 +290,71 @@ export class Ponte {
     this.fila.adicionar(telefone, m.chatId, { id: m.id, timestamp: m.timestamp, texto, ...nomeDoContato(m) });
   }
 
+  /** Todo áudio do cliente vai ao CRM uma vez; só com a IA atendendo ele é transcrito e entra no lote. */
+  private async receberAudio(telefone: string, m: MensagemRecebida): Promise<void> {
+    const comIa = this.iaAtende(telefone) && this.atendimento.modo(telefone) === "ia";
+    if (!comIa) {
+      if (this.opcoes.observador?.midia && !this.audiosObservados.has(m.id)) {
+        this.audiosObservados.add(m.id);
+        const midia = await this.baixar(m);
+        if (midia) this.observarMidia(telefone, m.id, midia, null, "NAO_TRANSCRITO");
+      }
+      if (!this.iaAtende(telefone)) return;
+      this.concluir([m.id]);
+      if (this.podeMarcarLida(telefone, false)) await this.marcarComoLida(m.chatId);
+      return;
+    }
+
+    // Reservado antes do download para o áudio não chegar depois do texto que veio atrás dele
+    if (!this.fila.reservar(telefone, m.chatId, m.id)) return;
+    const midia = await this.baixar(m);
+    const texto = midia && this.opcoes.transcritor ? await this.opcoes.transcritor.transcrever(Buffer.from(midia.base64, "base64"), midia.mime) : null;
+    if (midia && !this.audiosObservados.has(m.id)) {
+      this.audiosObservados.add(m.id);
+      this.observarMidia(telefone, m.id, midia, texto, texto ? "OK" : "FALHOU");
+    }
+    if (texto) {
+      this.fila.preencher(telefone, m.id, { id: m.id, timestamp: m.timestamp, texto: neutralizarMarcadores(texto).slice(0, LIMITE_TEXTO), ...nomeDoContato(m) });
+      return;
+    }
+    this.fila.cancelar(telefone, m.id);
+    this.reservados.add(m.id);
+    try {
+      // Aviso que não sai: não conclui, e a varredura tenta de novo
+      if (!(await this.envio.paraCliente(telefone, m.chatId, MSG_AUDIO_FALHOU))) return;
+      this.concluir([m.id]);
+      if (this.podeMarcarLida(telefone, false)) await this.marcarComoLida(m.chatId);
+    } finally {
+      this.reservados.delete(m.id);
+    }
+  }
+
+  /** Baixa a mídia no prazo e no teto; null quando não deu (o motivo vai ao log). */
+  private async baixar(m: MensagemRecebida): Promise<MidiaBaixada | null> {
+    if (m.bytesDeclarados !== undefined && m.bytesDeclarados > TAMANHO_MAXIMO_BYTES) return null;
+    try {
+      return await comPrazo(m.baixarMidia?.() ?? Promise.resolve(null), PRAZO_DOWNLOAD_MS, null);
+    } catch (err) {
+      this.log({ type: "midia_nao_baixou", id: m.id, erro: String(err) });
+      return null;
+    }
+  }
+
+  private observarMidia(telefone: string, id: string, midia: MidiaBaixada, transcricao: string | null, status: MidiaObservada["status"]): void {
+    try {
+      this.opcoes.observador?.midia?.({ id, telefone, mime: midia.mime, base64: midia.base64, transcricao, status });
+    } catch (err) {
+      this.log({ type: "observador_falhou", erro: String(err) });
+    }
+  }
+
   private async mensagemDeMidia(telefone: string, m: MensagemRecebida): Promise<MensagemLote> {
     const legenda = neutralizarMarcadores(m.texto).trim();
     const recusa = (motivo: string): MensagemLote => ({ id: m.id, timestamp: m.timestamp, texto: juntar(motivo, legenda) });
     if (m.bytesDeclarados !== undefined && m.bytesDeclarados > TAMANHO_MAXIMO_BYTES) {
       return recusa("[arquivo recusado: arquivo, maior que 16 MB]");
     }
-    let midia: MidiaBaixada | null = null;
-    try {
-      midia = await comPrazo(m.baixarMidia?.() ?? Promise.resolve(null), PRAZO_DOWNLOAD_MS, null);
-    } catch (err) {
-      this.log({ type: "midia_nao_baixou", id: m.id, erro: String(err) });
-    }
+    const midia = await this.baixar(m);
     // Falha nossa, não do arquivo: sem dizer isso o agente culpava o formato (#25).
     if (!midia) return recusa("[arquivo recusado: arquivo, não chegou por falha nossa ao baixar; não é o formato]");
     const salvo = salvarMidia(this.opcoes.artesDir, telefone, m.id, midia);

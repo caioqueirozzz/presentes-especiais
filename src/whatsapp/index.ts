@@ -13,6 +13,8 @@ import { criarLogPonte } from "./log.js";
 import { PgModoLia, configLiaPadrao } from "./modoLia.js";
 import { Ponte } from "./ponte.js";
 import { CanalWwebjs } from "./sessao.js";
+import OpenAI from "openai";
+import { transcritorOpenAI, type ClienteTranscricao } from "./transcricao.js";
 
 async function main(): Promise<void> {
   exigirAmbiente("ponte");
@@ -31,6 +33,13 @@ async function main(): Promise<void> {
   });
   const armazem = new PgEstadoPonte(banco, log);
   const estadoInicial = await armazem.carregar();
+  const transcritor = config.openaiApiKey
+    ? transcritorOpenAI(
+        new OpenAI({ apiKey: config.openaiApiKey, timeout: 60_000, maxRetries: 0 }) as unknown as ClienteTranscricao,
+        process.env.TRANSCRICAO_MODELO || "whisper-1",
+        log
+      )
+    : undefined;
   const ponte = new Ponte(
     canal,
     criarClienteHttp(config.agente.url, w.agenteTimeoutMs),
@@ -42,6 +51,7 @@ async function main(): Promise<void> {
       enviosPorMinuto: w.enviosPorMinuto,
       armazem,
       estadoInicial,
+      ...(transcritor ? { transcritor } : {}),
       ...(crmLigado ? { observador: new ObservadorCrm(config.crm.url, config.crm.segredo, (t) => new PgConversas(banco).ler(t), log) } : {}),
     },
     log

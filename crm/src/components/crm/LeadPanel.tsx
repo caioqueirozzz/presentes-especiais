@@ -115,7 +115,7 @@ export function LeadPanel({
 
       {/* key por aba: cada aba abre do topo, sem herdar a rolagem da conversa */}
       <div key={tab} className="thin-scroll mt-2 min-h-0 flex-1 overflow-y-auto">
-        {tab === "conversa" && <Conversation messages={data.messages} />}
+        {tab === "conversa" && <Conversation leadId={lead.id} messages={data.messages} />}
         {tab === "ficha" && <LeadForm lead={lead} sellers={sellers} onSaved={refresh} />}
         {tab === "historico" && <History leadId={lead.id} events={data.events} onAdded={refresh} />}
       </div>
@@ -329,7 +329,7 @@ function AttentionBar({ lead, onResolved }: { lead: Lead; onResolved: () => void
   );
 }
 
-function Conversation({ messages }: { messages: Message[] }) {
+function Conversation({ leadId, messages }: { leadId: string; messages: Message[] }) {
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
@@ -358,7 +358,18 @@ function Conversation({ messages }: { messages: Message[] }) {
                     {m.author === "AGENTE" ? "Lia · agente" : m.sent_by_name ? `${m.sent_by_name} · pelo CRM` : "Equipe · pelo celular"}
                   </p>
                 )}
-                <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                {m.kind === "audio" && m.has_media ? (
+                  <>
+                    {/* preload none: abrir o lead não baixa todos os áudios */}
+                    <audio controls preload="none" src={`/api/leads/${leadId}/messages/${m.id}/audio`} className="max-w-full" />
+                    {m.transcription_status === "OK" && m.transcription && (
+                      <p className="mt-1 whitespace-pre-wrap break-words italic opacity-80">Transcrição: {m.transcription}</p>
+                    )}
+                    {m.transcription_status === "FALHOU" && <p className="mt-1 text-[12px] opacity-70">Transcrição falhou: ouça o áudio</p>}
+                  </>
+                ) : (
+                  <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                )}
                 <p className="mt-1 text-right text-[10px] opacity-50">{new Date(m.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p>
               </div>
             </div>

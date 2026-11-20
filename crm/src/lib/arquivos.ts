@@ -34,7 +34,20 @@ export function detectarTipo(bytes: Uint8Array): TipoArquivo | null {
 }
 
 export const ehAnalisavel = (t: TipoArquivo) => t === "png" || t === "jpeg" || t === "webp";
-export const chaveSegura = (chave: string) => chave.startsWith("design/") && !chave.includes("..") && !chave.includes("\\");
+
+export type TipoAudio = "ogg" | "mp3" | "m4a";
+export const MIME_AUDIO: Record<TipoAudio, string> = { ogg: "audio/ogg", mp3: "audio/mpeg", m4a: "audio/mp4" };
+
+/** Áudio pelos primeiros bytes. Fora do detectarTipo para o design não aceitar nota de voz como referência. */
+export function detectarAudio(bytes: Uint8Array): TipoAudio | null {
+  const ascii = (i: number, s: string) => [...s].every((c, k) => bytes[i + k] === c.charCodeAt(0));
+  if (ascii(0, "OggS")) return "ogg"; // o ptt do WhatsApp (Opus)
+  if (ascii(4, "ftyp")) return "m4a";
+  if (ascii(0, "ID3") || (bytes[0] === 0xff && (bytes[1] ?? 0) >= 0xe0)) return "mp3";
+  return null;
+}
+export const chaveSegura = (chave: string) =>
+  (chave.startsWith("design/") || chave.startsWith("audios/")) && !chave.includes("..") && !chave.includes("\\");
 
 function segredo(): string {
   const s = process.env.AUTH_SECRET;
