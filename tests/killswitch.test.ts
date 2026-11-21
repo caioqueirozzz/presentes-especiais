@@ -1,8 +1,6 @@
-import { mkdtempSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { AgenteDefinitivo, MSG_SUSPENSAO } from "../src/api/agenteDefinitivo.js";
+import { MemoriaConversas } from "../src/conversas/armazem.js";
 import { RepositorioConversas } from "../src/conversas/repositorio.js";
 import { MockBrindeMeClient } from "../src/integrations/brindeme/mockClient.js";
 import { setBaseConhecimento, setLacunaStore } from "../src/tools/consultarConhecimento.js";
@@ -17,8 +15,7 @@ import { Logger } from "../src/logging/logger.js";
 const TEL = "5583999990000";
 
 function montar(lerEstado?: () => { suspenso: boolean; ferramentasDesligadas?: string[] }) {
-  const dir = mkdtempSync(join(tmpdir(), "ks-"));
-  const repo = new RepositorioConversas(dir);
+  const repo = new RepositorioConversas(new MemoriaConversas());
   const agente = new AgenteDefinitivo({
     repo,
     llm: new ScriptedLLM([endTurn("Olá!")]),
@@ -44,7 +41,7 @@ describe("kill switch — AgenteDefinitivo", () => {
     expect(r.modo).toBe("ia");
     expect(r.avisoAtendente).toContain("Agente suspenso");
     expect(r.avisoAtendente).toContain("quero 50 canecas");
-    const salva = repo.carregar(TEL);
+    const salva = await repo.carregar(TEL);
     // A mensagem não se perde: fica no histórico para o atendente e para a IA quando voltar.
     expect(salva.estado.historico.map((m) => m.content)).toContain("quero 50 canecas");
     expect(salva.turnos).toHaveLength(1);
@@ -85,11 +82,11 @@ describe("kill switch — AgenteDefinitivo", () => {
     // Agora suspende e tenta de novo o mesmo turnoId
     const { agente: agenteB, repo } = montar(() => ({ suspenso: true }));
     // Agente B lê do mesmo repo — tem o turno guardado
-    const dir = mkdtempSync(join(tmpdir(), "ks-"));
-    const repo2 = new RepositorioConversas(dir);
-    const c = repo2.carregar(TEL);
+    const armazem = new MemoriaConversas();
+    const repo2 = new RepositorioConversas(armazem);
+    const c = await repo2.carregar(TEL);
     c.turnos.push({ turnoId: p.turnoId, resposta: original, ids: p.mensagens.map((m) => m.id) });
-    repo2.salvar(c);
+    await repo2.salvar(c);
     const agenteC = new AgenteDefinitivo({
       repo: repo2,
       llm: new ScriptedLLM(),

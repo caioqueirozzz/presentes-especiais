@@ -16,6 +16,8 @@ export interface DisjuntorOptions {
   limiteFalhas?: number;
   /** Quanto tempo fica aberto antes de deixar passar uma sonda. */
   cooldownMs?: number;
+  /** Quais erros contam como falha; padrão: rede, 401/403/408 e 5xx. */
+  contaComoFalha?: (err: unknown) => boolean;
   /** Injetável para teste. */
   agora?: () => number;
 }
@@ -28,7 +30,7 @@ export class CircuitOpenError extends Error {
 }
 
 /** 401/403 também abrem: chave inválida não melhora com retry. */
-function contaComoFalha(err: unknown): boolean {
+function contaComoFalhaPadrao(err: unknown): boolean {
   if (err instanceof NetworkError) return true;
   if (err instanceof ApiError) {
     return err.status === 401 || err.status === 403 || err.status === 408 || err.status >= 500;
@@ -42,11 +44,13 @@ export class CircuitBreaker {
   private readonly limiteFalhas: number;
   private readonly cooldownMs: number;
   private readonly agora: () => number;
+  private readonly contaComoFalha: (err: unknown) => boolean;
 
   constructor(options?: DisjuntorOptions) {
     this.limiteFalhas = options?.limiteFalhas ?? 3;
     this.cooldownMs = options?.cooldownMs ?? 2 * 60 * 1000;
     this.agora = options?.agora ?? Date.now;
+    this.contaComoFalha = options?.contaComoFalha ?? contaComoFalhaPadrao;
   }
 
   get estado(): EstadoDisjuntor {
@@ -67,7 +71,7 @@ export class CircuitBreaker {
   }
 
   registrarFalha(err: unknown): void {
-    if (!contaComoFalha(err)) {
+    if (!this.contaComoFalha(err)) {
       // Resposta válida da API (404, 422): o serviço está de pé.
       this.registrarSucesso();
       return;

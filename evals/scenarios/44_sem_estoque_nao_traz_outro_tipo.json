@@ -1,0 +1,21 @@
+{
+  "id": "44_sem_estoque_nao_traz_outro_tipo",
+  "descricao": "Dogfooding 09/11: empilhadeira sem estoque para 200 trazia 3 Carro Miniatura. O vizinho de outro tipo não entra.",
+  "mensagens": [
+    "preciso de 200 miniaturas de empilhadeira"
+  ],
+  "expectativas": [
+    {
+      "tipo": "chamou_ferramenta",
+      "ferramenta": "buscar_produtos"
+    },
+    {
+      "tipo": "resposta_nao_contem",
+      "padrao": "fusca|carro miniatura"
+    },
+    {
+      "tipo": "resposta_contem",
+      "padrao": "estoque|dispon|quantidade|atendente|equipe"
+    }
+  ]
+}

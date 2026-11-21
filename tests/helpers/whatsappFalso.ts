@@ -12,6 +12,9 @@ export class WhatsAppFalso implements CanalWhatsApp {
   naoLidas: ConversaPendente[] = [];
   /** texto → quantas das próximas tentativas de enviar esse texto falham */
   falhar = new Map<string, number>();
+  imagens: Array<{ chatId: string; url: string; legenda: string }> = [];
+  /** url → quantas das próximas tentativas de enviar essa imagem falham */
+  falharImagem = new Map<string, number>();
   private handler: (m: MensagemRecebida) => void = () => {};
   private seq = 0;
 
@@ -33,6 +36,17 @@ export class WhatsAppFalso implements CanalWhatsApp {
     }
     this.enviadas.push({ chatId, texto });
     this.handler(this.mensagem({ chatId, texto, deMim: true, paraMim: chatId === this.eu }));
+  }
+
+  async enviarImagem(chatId: string, url: string, legenda: string): Promise<void> {
+    const restantes = this.falharImagem.get(url) ?? 0;
+    if (restantes > 0) {
+      this.falharImagem.set(url, restantes - 1);
+      throw new Error("falha de envio de imagem simulada");
+    }
+    this.imagens.push({ chatId, url, legenda });
+    // Como o whatsapp-web.js: o eco da foto chega com a legenda no corpo.
+    this.handler(this.mensagem({ chatId, texto: legenda, deMim: true, paraMim: chatId === this.eu, tipo: "midia" }));
   }
 
   /** Cada chamada de digitando, com a duração pedida. */

@@ -36,6 +36,7 @@ const SUGGESTIONS = {
     "Como estou em relação à minha meta?",
     "Escreva um follow-up para meu lead mais quente",
   ],
+  DESIGNER: [] as string[],
 };
 
 /** **negrito** inline (o modelo às vezes usa mesmo instruído a não usar) */
@@ -101,7 +102,9 @@ function IaContent() {
       .catch((err) => setError((err as Error).message));
   }, [conversationId]);
 
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }), [messages.length, sending]);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages.length, sending]);
 
   async function send(text: string) {
     const content = text.trim();

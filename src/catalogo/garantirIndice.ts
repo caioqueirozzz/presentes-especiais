@@ -22,12 +22,12 @@ export async function garantirIndice(
   opcoes: { autoSincronizar: boolean; agora?: Date }
 ): Promise<SituacaoIndice> {
   const agora = opcoes.agora ?? new Date();
-  const atual = store.carregar();
+  const atual = await store.carregar();
 
   if (atual.produtos.length === 0) {
     if (!opcoes.autoSincronizar) return { situacao: "vazio" };
     await sincronizarCatalogo(client, store, { agora });
-    return { situacao: "sincronizado", produtos: store.carregar().produtos.length };
+    return { situacao: "sincronizado", produtos: (await store.carregar()).produtos.length };
   }
 
   const idadeHoras = atual.sincronizado_em

@@ -166,7 +166,7 @@ export function TeamView() {
                     </td>
                     <td className="px-4 py-4">
                       <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${m.role === "ADMIN" ? "border-accent-gold/40 text-accent-gold" : "border-outline-variant/60 text-on-surface-variant"}`}>
-                        {m.role === "ADMIN" ? "ADMIN" : "COLABORADOR"}
+                        {m.role}
                       </span>
                       {!m.is_active && <span className="ml-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">inativo</span>}
                       {m.is_active && m.must_change_password && <span className="ml-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800">1º acesso pendente</span>}
@@ -253,6 +253,7 @@ export function TeamView() {
               <Label>Perfil</Label>
               <select className={inputClass} value={form.role} onChange={set("role")} disabled={editing !== "new" && editing?.id === me.id}>
                 <option value="COLABORADOR">Colaborador</option>
+                <option value="DESIGNER">Designer</option>
                 <option value="ADMIN">Admin</option>
               </select>
             </label>

@@ -109,7 +109,7 @@ describe("auditoria da base de conhecimento no turno", () => {
     const log = logDa(state.conversaId);
     expect(log.find((e) => e.type === "kb_consulta")).toMatchObject({ resultado: "lacuna", itens: [] });
     expect(log.find((e) => e.type === "response_sent")).not.toHaveProperty("kb_itens");
-    expect(lacunas.listar()).toHaveLength(1);
+    expect(await lacunas.listar()).toHaveLength(1);
 
     // seen[1] é a chamada logo depois da ferramenta; o "Vou chamar um atendente." sem transferir ainda gera a cobrança.
     const depoisDaFerramenta = llm.seen[1];
@@ -142,6 +142,6 @@ describe("prompt de sistema", () => {
     expect(sys).toContain("sem_resposta_na_base");
     expect(sys).toMatch(/instrucao: "transferir"/);
     expect(sys).toContain("Como recomendar produtos");
-    expect(sys).toMatch(/no máximo 3 opções/);
+    expect(sys).toMatch(/Os cartões já vão ao cliente/);
   });
 });

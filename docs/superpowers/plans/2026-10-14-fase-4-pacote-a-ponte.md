@@ -18,7 +18,7 @@ definitiva implementando a mesma interface `Agente`.
 
 ## Para quem chega sem contexto
 
-- **Repo:** `C:\Users\joao_\dev\DC Tech\Presentes Especiais\repo-agente-brindeme` (GitHub `caioqueirozzz/agente-brindeme`).
+- **Repo:** raiz deste repositório (GitHub `caioqueirozzz/agente-brindeme`).
 - **Branch:** `fase-4-integracao-whatsapp` (já existe, criada sobre `fase-3-conhecimento-recomendacao` = PR #3, que está
   sobre o PR #1). Trabalhe nela; não troque de branch e não faça rebase.
 - **Antes da Task A1:** `npm test` deve dar 347 testes verdes e `npm run typecheck` limpo. Se não der, pare e avise.
@@ -3184,7 +3184,7 @@ git commit -m "feat(fase-4): ponte — lote, entrega em partes, queda do agente 
   `novoEstadoSaude()`, `tipoDaMensagem(tipo: string): TipoMensagem`; `class CanalWwebjs implements CanalWhatsApp` com
   `iniciar()`; scripts `npm run whatsapp`, `npm run whatsapp:ponte`.
 
-As defesas vêm do LembreMe (`C:\Users\joao_\dev\DC Tech\LembreMe\LembreMe\index.mjs:648-1000`), reescritas:
+As defesas vêm do LembreMe (`LembreMe/index.mjs:648-1000`, projeto interno), reescritas:
 vigia de "pronto" de 90s após `authenticated` (troca a versão e relança); verificação de saúde a cada 5 min com 3
 leituras ruins seguidas antes de agir; batimento (`pupPage.evaluate`) a cada 2 min, 3 falhas = página zumbi; `UNPAIRED`
 confirmado 3 vezes → para e avisa, sem loop de QR; reconexão sempre por `destroy()` + novo cliente, com trava, **nunca

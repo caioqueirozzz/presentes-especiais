@@ -1,0 +1,14 @@
+{
+  "id": "44_ajuste_de_mockup_vai_ao_design",
+  "descricao": "Cliente pede ajuste no mockup que recebeu: vai ao design",
+  "mensagens": [
+    "oi, recebi o mockup da camiseta do evento que vocês mandaram",
+    "pode trocar o azul da arte por vermelho?"
+  ],
+  "expectativas": [
+    {
+      "tipo": "chamou_ferramenta",
+      "ferramenta": "encaminhar_design"
+    }
+  ]
+}

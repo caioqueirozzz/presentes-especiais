@@ -1,0 +1,24 @@
+{
+  "id": "45_dessa_usa_o_id_do_ajuste",
+  "descricao": "Dogfooding 09/11 §3.2: 'quero N dessa' sobre um produto que só veio em ajustes_sugeridos vai para detalhar_produto, não para outra busca.",
+  "mensagens": [
+    "preciso de 200 miniaturas de empilhadeira",
+    "então quero 50 dessa mesmo"
+  ],
+  "expectativas": [
+    {
+      "tipo": "chamou_ferramenta",
+      "ferramenta": "detalhar_produto"
+    },
+    {
+      "tipo": "argumento_contem",
+      "ferramenta": "detalhar_produto",
+      "campo": "produto_id",
+      "padrao": "prod-013"
+    },
+    {
+      "tipo": "resposta_nao_contem",
+      "padrao": "fusca|carro miniatura"
+    }
+  ]
+}

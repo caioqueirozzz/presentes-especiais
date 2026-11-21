@@ -1,0 +1,13 @@
+{
+  "id": "33_sob_demanda",
+  "descricao": "Produto sob demanda com estoque 0: aparece com preço e o agente não diz que falta estoque",
+  "sob_demanda": ["prod-006"],
+  "mensagens": ["Quero 1500 chaveiros de acrílico personalizados"],
+  "expectativas": [
+    { "tipo": "chamou_ferramenta", "ferramenta": "buscar_produtos" },
+    { "tipo": "resposta_contem", "padrao": "Chaveiro" },
+    { "tipo": "resposta_contem", "padrao": "R\\$\\s*\\d" },
+    { "tipo": "resposta_nao_contem", "padrao": "sem estoque|não tem (no )?estoque|não temos" },
+    { "tipo": "max_transferencias", "max": 0 }
+  ]
+}

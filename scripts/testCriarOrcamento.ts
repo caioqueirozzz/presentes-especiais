@@ -13,6 +13,7 @@ import "dotenv/config";
 import { HttpBrindeMeClient } from "../src/integrations/brindeme/httpClient.js";
 import { ApiError } from "../src/integrations/brindeme/errors.js";
 import type { CreateBudgetBody } from "../src/integrations/brindeme/types.js";
+import { logarErroBanco } from "../src/db/banco.js";
 
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
@@ -76,4 +77,4 @@ async function main() {
   }
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => { console.error("Falha:", logarErroBanco(e)); process.exit(1); });

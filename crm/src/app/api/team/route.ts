@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   const body = await readJson(request);
   const name = typeof body.name === "string" ? body.name.trim().slice(0, 120) : "";
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase().slice(0, 160) : "";
-  const role = body.role === "ADMIN" ? "ADMIN" : "COLABORADOR";
+  const role = body.role === "ADMIN" || body.role === "DESIGNER" ? body.role : "COLABORADOR";
   if (name.length < 2) return jsonError("Informe o nome.", 400);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonError("E-mail inválido.", 400);
   const goal = Number(body.monthly_goal);

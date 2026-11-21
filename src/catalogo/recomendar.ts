@@ -17,10 +17,15 @@ import { tokenizar } from "../busca/texto.js";
 import { sinonimosDe } from "../busca/sinonimos.js";
 import type { BrindeMeClient } from "../integrations/brindeme/client.js";
 import { translateApiError, ApiError, type FalhaApi } from "../integrations/brindeme/errors.js";
-import type { ProductIndexStore, ProdutoIndexado } from "./indice.js";
+import type { FaixaPreco, IndiceCatalogo, ProdutoIndexado } from "./indice.js";
 import { construirRegistro } from "./indice.js";
+import { cotarAoVivo, cotou, MAX_CORES_COTADAS, type ResultadoCotacao } from "./cotacao.js";
+import { proximoDegrau } from "./faixasDeVenda.js";
+import { logarPrecoDivergente } from "./logPrecos.js";
+import { arredondar } from "../integrations/brindeme/mappers.js";
 import {
   calcularOferta,
+  tetoUnitarioCentavos,
   type MotivoInelegivel,
   type Orcamento,
   type OfertaOk,
@@ -31,6 +36,9 @@ import {
   radicaisDasOcasioes,
   type OccasionTagStore,
 } from "./ocasioes.js";
+import { pontuarCatalogo, semNotaSemantica, type MotorSemantico } from "./semantica.js";
+import { logarBuscaDegradada } from "./logBusca.js";
+import { canonizarTipo } from "./tipos.js";
 
 /** Quantas opções o agente apresenta (Fase 1: no máximo 3 por vez). */
 export const MAX_OPCOES = 3;
@@ -53,13 +61,18 @@ export interface PedidoRecomendacao {
   precoMaxUnitario?: number;
   orcamentoTotal?: number;
   ocasiao?: string;
+  /** Tipo que o cliente nomeou ("camiseta", "caneca"). Com ele, só produtos desse tipo são candidatos. */
+  tipoProduto?: string;
 }
 
 export interface Dependencias {
-  index: ProductIndexStore;
+  /** Já carregado: ler do banco a cada pergunta custaria uma ida e volta; a mesma referência mantém o cache do BM25. */
+  indice: IndiceCatalogo;
   tags: OccasionTagStore;
   client: BrindeMeClient;
   agora?: () => Date;
+  /** Ausente, ou sem vetores gravados: a busca roda no BM25 de sempre. */
+  semantica?: MotorSemantico;
 }
 
 export interface ItemRecomendado {
@@ -70,33 +83,45 @@ export interface ItemRecomendado {
   ocasiaoConfere: boolean;
   /** Relevância 0..1 usada na ordenação. */
   relevancia: number;
+  /** Cotação exata do site das primeiras cores de `oferta.cores` (até 6), na mesma ordem. Vazio sem quantidade. */
+  cotacoes: ResultadoCotacao[];
 }
 
-export type Ajuste =
+export type Ajuste = (
   | {
       tipo: "aumentar_quantidade";
       produto_id: string;
       nome: string;
       quantidade: number;
-      preco_unitario: number;
-      total_estimado: number;
+      preco_unitario?: number;
+      total_estimado?: number;
     }
   | {
       tipo: "reduzir_quantidade";
       produto_id: string;
       nome: string;
       quantidade: number;
-      preco_unitario: number;
-      total_estimado: number;
+      preco_unitario?: number;
+      total_estimado?: number;
     }
   | {
       tipo: "aumentar_orcamento";
       produto_id: string;
       nome: string;
       quantidade: number;
-      preco_unitario_minimo: number;
-      total_estimado: number;
-    };
+      preco_unitario_minimo?: number;
+      total_estimado?: number;
+    }
+) & {
+  /** Cor que o preço cota (a mais barata pelo índice): sem ela o modelo falaria o valor de uma cor como se fosse de todas. */
+  cor?: string;
+  /**
+   * Id do subproduto dessa cor. É o que deixa o produto do ajuste entrar em
+   * `ultimasOpcoes`: sem ele, o "quero 200 dessa" do dogfooding virava busca
+   * nova e trazia outro produto, porque o id do ajuste não existia no estado.
+   */
+  subproduto_id?: string;
+};
 
 export type Recomendacao =
   | {
@@ -119,6 +144,12 @@ export type Recomendacao =
       ocasioes: string[];
       descartadosNaRevalidacao: number;
     }
+  /**
+   * O cliente nomeou um tipo e o catálogo não tem NENHUM produto desse tipo.
+   * Separado de "nenhum" de propósito: aqui não há vizinho de outro tipo para
+   * oferecer, e mostrar um seria repetir o erro que o dogfooding pegou.
+   */
+  | { tipo: "nenhum_do_tipo"; tipoPedido: string; ocasioes: string[] }
   | { tipo: "falha_api"; erro: FalhaApi }
   | { tipo: "indice_vazio" };
 
@@ -195,27 +226,17 @@ interface Candidato {
   ocasiaoConfere: boolean;
 }
 
-function orcamentoDe(p: PedidoRecomendacao): Orcamento {
-  // Total sem quantidade não vira teto unitário: cada produto seria avaliado na
-  // sua própria quantidade mínima e o "total" perderia o sentido.
-  return {
-    unitarioMax: p.precoMaxUnitario,
-    totalMax: p.quantidade !== undefined ? p.orcamentoTotal : undefined,
-  };
-}
-
-export async function recomendar(
-  pedido: PedidoRecomendacao,
+/**
+ * Candidatos pelo BM25 — o caminho de sempre, que agora é a RESERVA.
+ *
+ * Continua valendo quando não há motor semântico, quando os vetores não foram
+ * gerados, quando a OpenAI falha e para o produto que ainda não tem vetor.
+ */
+function candidatosLexicais(
+  produtos: ProdutoIndexado[],
+  consulta: ConsultaInterpretada,
   deps: Dependencias
-): Promise<Recomendacao> {
-  const agora = deps.agora ?? (() => new Date());
-  const { produtos } = deps.index.carregar();
-  if (produtos.length === 0) return { tipo: "indice_vazio" };
-
-  const consulta = interpretar(pedido.consulta, pedido.ocasiao);
-  const orcamento = orcamentoDe(pedido);
-
-  // --- candidatos por relevância -------------------------------------------------
+): Candidato[] {
   const pontuacoes: Map<string, PontuacaoDocumento> = consulta.termos.length
     ? motorDe(produtos).pontuar(consulta.termos)
     : new Map();
@@ -245,6 +266,112 @@ export async function recomendar(
       ocasiaoConfere,
     });
   }
+  return candidatos;
+}
+
+/**
+ * Candidatos pelo motor semântico. `null` quer dizer "não deu, use o BM25" —
+ * e nesse caso a degradação já foi logada por quem a detectou.
+ *
+ * `nenhumDoTipo` é diferente de lista vazia: significa que o filtro por tipo
+ * rodou e não sobrou nada. Aí não existe segunda opção honesta para oferecer.
+ */
+async function candidatosSemanticos(
+  produtos: ProdutoIndexado[],
+  pedido: PedidoRecomendacao,
+  consulta: ConsultaInterpretada,
+  deps: Dependencias
+): Promise<{ candidatos: Candidato[]; nenhumDoTipo: boolean } | null> {
+  const motor = deps.semantica;
+  if (!motor) return null;
+
+  const retrato = await motor.retrato();
+  if (!retrato) return null;
+
+  const vetorConsulta = await motor.embedding(pedido.consulta);
+  if (!vetorConsulta) return null;
+
+  // Mesma forma dos tipos do catálogo: "Camisetas" e "camiseta" não podem dar cossenos diferentes.
+  const tipoPedido = canonizarTipo(pedido.tipoProduto ?? "");
+  let vetorTipo: Float32Array | null = null;
+  if (tipoPedido) {
+    if (!retrato.vetoresTipo) {
+      // Sem os vetores de tipo não há filtro; melhor o BM25 do que fingir que filtrou.
+      logarBuscaDegradada({ motivo: "sem_vetores_de_tipo", tipo_pedido: tipoPedido });
+      return null;
+    }
+    vetorTipo = await motor.embedding(tipoPedido);
+    if (!vetorTipo) return null;
+  }
+
+  const pontuacoes = pontuarCatalogo(
+    produtos.map((p) => p.id),
+    retrato,
+    vetorConsulta,
+    vetorTipo,
+    motor.piso,
+    motor.margem
+  );
+
+  // Quem a semântica não pontua entra pelo BM25 até a próxima geração (spec §3.6).
+  const filtrando = vetorTipo !== null;
+  const reserva = candidatosLexicais(
+    produtos.filter((p) => semNotaSemantica(p.id, retrato, filtrando)),
+    consulta,
+    deps
+  );
+
+  // Com tipo pedido e nada acima do piso: o catálogo não tem esse tipo de produto.
+  if (tipoPedido && pontuacoes.size === 0 && reserva.length === 0) return { candidatos: [], nenhumDoTipo: true };
+
+  const admitidos: Candidato[] = [];
+  for (const p of produtos) {
+    const nota = pontuacoes.get(p.id);
+    if (!nota) continue;
+    const ocasiaoConfere = consulta.ocasioes.length > 0 && etiquetadoCom(p, consulta.ocasioes, deps.tags);
+    // Sem tipo, entra quem passa do piso de texto OU tem a etiqueta da ocasião, como no BM25
+    // ("produtos para natal" não lembra produto nenhum pelo texto, mas a etiqueta admite).
+    if (!filtrando && nota.similaridade < motor.pisoTexto && !ocasiaoConfere) continue;
+    admitidos.push({ produto: p, similaridade: nota.similaridade, ocasiaoConfere });
+  }
+
+  // Normalizada pela melhor da rodada, como o BM25 (score/maxScore): o cosseno cru
+  // fica em ~0,2–0,6 e deixaria o peso da ocasião mandar na ordem.
+  const melhor = Math.max(0, ...admitidos.map((c) => c.similaridade));
+  const candidatos = admitidos.map((c) => ({ ...c, similaridade: melhor > 0 ? c.similaridade / melhor : 0 }));
+  return { candidatos: [...candidatos, ...reserva], nenhumDoTipo: false };
+}
+
+function orcamentoDe(p: PedidoRecomendacao): Orcamento {
+  // Total sem quantidade não vira teto unitário: cada produto seria avaliado na
+  // sua própria quantidade mínima e o "total" perderia o sentido.
+  return {
+    unitarioMax: p.precoMaxUnitario,
+    totalMax: p.quantidade !== undefined ? p.orcamentoTotal : undefined,
+  };
+}
+
+export async function recomendar(
+  pedido: PedidoRecomendacao,
+  deps: Dependencias
+): Promise<Recomendacao> {
+  const agora = deps.agora ?? (() => new Date());
+  const { produtos } = deps.indice;
+  if (produtos.length === 0) return { tipo: "indice_vazio" };
+
+  const consulta = interpretar(pedido.consulta, pedido.ocasiao);
+  const orcamento = orcamentoDe(pedido);
+
+  // --- candidatos por relevância -------------------------------------------------
+  const semantico = await candidatosSemanticos(produtos, pedido, consulta, deps);
+
+  if (semantico?.nenhumDoTipo) {
+    return { tipo: "nenhum_do_tipo", tipoPedido: pedido.tipoProduto ?? "", ocasioes: consulta.ocasioes };
+  }
+
+  const candidatos: Candidato[] = semantico
+    ? semantico.candidatos
+    : candidatosLexicais(produtos, consulta, deps);
 
   if (candidatos.length === 0) {
     return {
@@ -335,11 +462,43 @@ export async function recomendar(
         descartados++;
         continue;
       }
+      let cotacoes: ResultadoCotacao[] = [];
+      let cores = oferta.cores;
+      {
+        // Sem quantidade, cota no pedido MÍNIMO do próprio produto (oferta.quantidade):
+        // antes o cartão saía sem preço nenhum e o modelo preenchia o vazio com valor
+        // inventado ou com "a confirmar" (dogfooding de 09/11). Com o preço do mínimo,
+        // ele tem o que dizer e ainda precisa perguntar a quantidade.
+        const q = oferta.quantidade;
+        const cotadas = oferta.cores.slice(0, MAX_CORES_COTADAS);
+        cotacoes = await cotarAoVivo(
+          deps.client,
+          cotadas.map((c) => ({
+            subprodutoId: c.subproduto_id,
+            quantidade: q,
+            proximoDegrau: proximoDegrau(r.fresco.subproducts.find((s) => s.id === c.subproduto_id)?.prices ?? [], q),
+          })),
+          agora
+        );
+        corrigirIndice(r.c.produto, cotacoes, q);
+        // O orçamento é conferido de novo com o preço exato; sem preço conhecido não dá para conferir, e o produto fica.
+        const teto = tetoUnitarioCentavos(orcamento, q);
+        const acima = (x: ResultadoCotacao) => cotou(x) && x.centavos > 0 && x.centavos > teto;
+        const comPreco = cotacoes.filter((x) => cotou(x) && x.centavos > 0);
+        if (comPreco.length > 0 && comPreco.every(acima)) {
+          descartados++;
+          continue;
+        }
+        const manter = cotacoes.map((x) => !acima(x));
+        cores = [...cotadas.filter((_, i) => manter[i]), ...oferta.cores.slice(MAX_CORES_COTADAS)];
+        cotacoes = cotacoes.filter((_, i) => manter[i]);
+      }
       itens.push({
         produto: registro,
-        oferta,
+        oferta: { ...oferta, cores },
         ocasiaoConfere: r.c.ocasiaoConfere,
         relevancia: relevancia(r.c),
+        cotacoes,
       });
     }
   }
@@ -368,7 +527,7 @@ export async function recomendar(
     motivo: "regras_nao_fecham",
     candidatosRelevantes: candidatos.length,
     eliminadosPor,
-    ajustes: propor(reprovados.slice(0, MAX_PARA_EXPLICAR), pedido, orcamento),
+    ajustes: await precificarAjustes(propor(reprovados.slice(0, MAX_PARA_EXPLICAR), pedido, orcamento), deps.client, agora),
     ocasioes: consulta.ocasioes,
     descartadosNaRevalidacao: descartados,
   };
@@ -383,9 +542,9 @@ function propor(
   reprovados: Array<{ c: Candidato; relevancia: number; motivo: MotivoInelegivel }>,
   pedido: PedidoRecomendacao,
   orcamento: Orcamento
-): Ajuste[] {
-  const ajustes: Ajuste[] = [];
-  const jaTem = (tipo: Ajuste["tipo"]) => ajustes.some((a) => a.tipo === tipo);
+): Array<{ ajuste: Ajuste; subprodutoId: string; cor: string }> {
+  const ajustes: Array<{ ajuste: Ajuste; subprodutoId: string; cor: string }> = [];
+  const jaTem = (tipo: Ajuste["tipo"]) => ajustes.some((a) => a.ajuste.tipo === tipo);
 
   for (const { c, motivo } of reprovados) {
     if (ajustes.length >= 2) break;
@@ -398,12 +557,16 @@ function propor(
       const o = calcularOferta(p, q, orcamento);
       if (o.ok) {
         ajustes.push({
-          tipo: "aumentar_quantidade",
-          produto_id: p.id,
-          nome: p.nome,
-          quantidade: q,
-          preco_unitario: o.preco_unitario,
-          total_estimado: o.total_estimado,
+          ajuste: {
+            tipo: "aumentar_quantidade",
+            produto_id: p.id,
+            nome: p.nome,
+            quantidade: q,
+            preco_unitario: o.preco_unitario,
+            total_estimado: o.total_estimado,
+          },
+          subprodutoId: o.cores[0].subproduto_id,
+            cor: o.cores[0].cor,
         });
       }
     } else if (motivo === "estoque_insuficiente" && !jaTem("reduzir_quantidade")) {
@@ -412,12 +575,16 @@ function propor(
         const o = calcularOferta(p, q, orcamento);
         if (o.ok) {
           ajustes.push({
-            tipo: "reduzir_quantidade",
-            produto_id: p.id,
-            nome: p.nome,
-            quantidade: q,
-            preco_unitario: o.preco_unitario,
-            total_estimado: o.total_estimado,
+            ajuste: {
+              tipo: "reduzir_quantidade",
+              produto_id: p.id,
+              nome: p.nome,
+              quantidade: q,
+              preco_unitario: o.preco_unitario,
+              total_estimado: o.total_estimado,
+            },
+            subprodutoId: o.cores[0].subproduto_id,
+            cor: o.cores[0].cor,
           });
         }
       }
@@ -428,16 +595,67 @@ function propor(
         const o = calcularOferta(p, base.quantidade, {});
         if (o.ok) {
           ajustes.push({
-            tipo: "aumentar_orcamento",
-            produto_id: p.id,
-            nome: p.nome,
-            quantidade: base.quantidade,
-            preco_unitario_minimo: preco,
-            total_estimado: o.total_estimado,
+            ajuste: {
+              tipo: "aumentar_orcamento",
+              produto_id: p.id,
+              nome: p.nome,
+              quantidade: base.quantidade,
+              preco_unitario_minimo: preco,
+              total_estimado: o.total_estimado,
+            },
+            subprodutoId: o.cores[0].subproduto_id,
+            cor: o.cores[0].cor,
           });
         }
       }
     }
   }
   return ajustes;
+}
+
+/** O preço do ajuste vem do site, da cor mais barata pelo índice; sem preço exato, o ajuste sai sem valor. */
+async function precificarAjustes(
+  lista: Array<{ ajuste: Ajuste; subprodutoId: string; cor: string }>,
+  client: BrindeMeClient,
+  agora: () => Date
+): Promise<Ajuste[]> {
+  if (lista.length === 0) return [];
+  const cotacoes = await cotarAoVivo(client, lista.map(({ ajuste, subprodutoId }) => ({ subprodutoId, quantidade: ajuste.quantidade })), agora);
+  return lista.map(({ ajuste, cor, subprodutoId }, i) => {
+    const c = cotacoes[i];
+    const exato = cotou(c) && c.centavos > 0 ? c.centavos : null;
+    const preco = exato === null ? undefined : exato / 100;
+    const total = exato === null ? undefined : arredondar((exato * ajuste.quantidade) / 100);
+    const comum = { cor: cor || undefined, subproduto_id: subprodutoId || undefined };
+    return ajuste.tipo === "aumentar_orcamento"
+      ? { ...ajuste, preco_unitario_minimo: preco, total_estimado: total, ...comum }
+      : { ...ajuste, preco_unitario: preco, total_estimado: total, ...comum };
+  });
+}
+
+/**
+ * Autocorreção (spec 6.7): a cotação exata vale e o grupo é corrigido no índice EM MEMÓRIA. Gravar o arquivo
+ * daqui disputaria com o sync:precos, que roda em outro processo.
+ */
+function corrigirIndice(produto: ProdutoIndexado, cotacoes: ResultadoCotacao[], quantidade: number): void {
+  for (const c of cotacoes) {
+    if (!cotou(c)) continue;
+    const sub = produto.subprodutos.find((s) => s.id === c.subproduto_id);
+    if (!sub) continue;
+    const faixa = sub.faixas.find((f) => quantidade >= f.min && quantidade <= f.max);
+    const indice = faixa ? Math.round(faixa.preco * 100) : null;
+    if ((indice ?? 0) === c.centavos) continue;
+    logarPrecoDivergente({ produto_id: produto.id, grupo_preco: sub.grupo_preco ?? "", subproduto_id: sub.id, quantidade, indice, site: c.centavos });
+    for (const s of produto.subprodutos) {
+      if (s === sub || (sub.grupo_preco && s.grupo_preco === sub.grupo_preco)) s.faixas = corrigirFaixa(s.faixas, quantidade, c.centavos);
+    }
+  }
+}
+
+// shortcut: a faixa inteira fica com o preço de um ponto; o sync:precos noturno regrava o certo.
+function corrigirFaixa(faixas: FaixaPreco[], quantidade: number, centavos: number): FaixaPreco[] {
+  const atual = faixas.find((f) => quantidade >= f.min && quantidade <= f.max);
+  const resto = faixas.filter((f) => f !== atual);
+  if (centavos === 0) return resto;
+  return [...resto, { min: atual?.min ?? quantidade, max: atual?.max ?? quantidade, preco: centavos / 100 }].sort((a, b) => a.min - b.min);
 }

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { alertaAgenteFora, MSG_AUDIO, MSG_INSTABILIDADE, Ponte, type OpcoesPonte } from "../src/whatsapp/ponte.js";
+import { alertaAgenteFora, MSG_AUDIO_FALHOU, MSG_INSTABILIDADE, Ponte, type OpcoesPonte } from "../src/whatsapp/ponte.js";
 import type { ResultadoLote } from "../src/whatsapp/agenteHttp.js";
 import { LIMITE_TEXTO } from "../src/contrato/esquemas.js";
 import { WhatsAppFalso } from "./helpers/whatsappFalso.js";
@@ -201,14 +201,37 @@ describe("Ponte", () => {
     });
   });
 
+  describe("devolução pelo CRM com mensagem consumida", () => {
+    it("o APROVO que o CRM já consumiu sai da fila e não chega à IA; as outras seguem", async () => {
+      const { canal, agente, ponte } = montar();
+      const aprovo = canal.mensagem({ chatId: CLIENTE, texto: "APROVO" });
+      await ponte.receber(aprovo);
+      await ponte.receber(canal.mensagem({ chatId: CLIENTE, texto: "e o prazo?" }));
+      await vi.advanceTimersByTimeAsync(1_000);
+      await ponte.devolverParaIa(TEL, undefined, [aprovo.id]);
+      await vi.runAllTimersAsync();
+      expect(agente.lotes.flatMap((l) => l.mensagens.map((m) => m.texto))).toEqual(["e o prazo?"]);
+      expect(agente.eventos.map((e) => e.tipo)).toContain("devolver");
+    });
+
+    it("consumida antes de a ponte receber: a mensagem é ignorada quando chega", async () => {
+      const { canal, agente, ponte } = montar();
+      const aprovo = canal.mensagem({ chatId: CLIENTE, texto: "APROVO" });
+      await ponte.devolverParaIa(TEL, undefined, [aprovo.id]);
+      await ponte.receber(aprovo);
+      await vi.runAllTimersAsync();
+      expect(agente.lotes).toEqual([]);
+    });
+  });
+
   describe("tipos de mensagem", () => {
     // A resposta ao áudio espera o "digitando" (timer): avance o relógio antes de aguardar o receber.
-    it("áudio: resposta fixa, não vai ao agente, marca como lida", async () => {
+    it("áudio que não baixa: pede o texto, não vai ao agente, marca como lida", async () => {
       const { canal, agente, ponte } = montar();
       const recebendo = ponte.receber(canal.mensagem({ chatId: CLIENTE, texto: "", tipo: "audio" }));
       await vi.runAllTimersAsync();
       await recebendo;
-      expect(canal.enviadas).toEqual([{ chatId: CLIENTE, texto: MSG_AUDIO }]);
+      expect(canal.enviadas).toEqual([{ chatId: CLIENTE, texto: MSG_AUDIO_FALHOU }]);
       expect(agente.lotes).toEqual([]);
       expect(canal.lidas).toEqual([CLIENTE]);
     });
@@ -220,7 +243,7 @@ describe("Ponte", () => {
       // "digitando" do aviso de áudio leva 2,55s; o lote só fecha aos 5s.
       await vi.advanceTimersByTimeAsync(4_000);
       await recebendo;
-      expect(canal.enviadas).toEqual([{ chatId: CLIENTE, texto: MSG_AUDIO }]);
+      expect(canal.enviadas).toEqual([{ chatId: CLIENTE, texto: MSG_AUDIO_FALHOU }]);
       expect(canal.lidas).toEqual([]);
       await vi.runAllTimersAsync();
       expect(canal.lidas).toEqual([CLIENTE]);
@@ -298,7 +321,7 @@ describe("Ponte", () => {
       await vi.runAllTimersAsync();
       expect(agente.lotes[0].mensagens.map((m) => m.texto)).toEqual([
         "[arquivo recusado: video.mp4, formato video/mp4 não aceito (aceitos: PNG, JPG, SVG, PDF)]",
-        "[arquivo recusado: arquivo, não foi possível baixar]",
+        "[arquivo recusado: arquivo, não chegou por falha nossa ao baixar; não é o formato]",
       ]);
       expect(agente.lotes[0].mensagens.every((m) => m.arquivo === undefined)).toBe(true);
     });

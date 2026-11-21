@@ -79,3 +79,18 @@ describe("modo humano", () => {
     expect(parsed.modo).toBe("humano");
   });
 });
+
+describe("preço de venda no mock", () => {
+  it("a tabela do fixture vale como preço de venda, em centavos; fora da faixa, 0", async () => {
+    const c = new MockBrindeMeClient();
+    const r = await c.precoVenda("sub-001-branco", [50, 100, 10_000]);
+    expect([...r]).toEqual([[50, 1890], [100, 1540], [10_000, 0]]);
+  });
+
+  it("falharPrecoVenda simula a rota fora; subproduto inexistente é formato", async () => {
+    const c = new MockBrindeMeClient();
+    await expect(c.precoVenda("nao-existe", [10])).rejects.toMatchObject({ motivo: "formato" });
+    c.falharPrecoVenda = true;
+    await expect(c.precoVenda("sub-001-branco", [50])).rejects.toMatchObject({ motivo: "indisponivel" });
+  });
+});

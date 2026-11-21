@@ -1,7 +1,8 @@
 import { z } from "zod";
 import type { BrindeMeClient } from "../integrations/brindeme/client.js";
 import type { ConversationState, FichaPedido } from "../agent/state.js";
-import { marcaUltimaMensagemCliente } from "../agent/state.js";
+import { marcaUltimaMensagemCliente, nomesDosProdutos, ultimasMensagens } from "../agent/state.js";
+import { encaminharParaDesign } from "../integrations/crm/design.js";
 
 export const MOTIVOS = [
   "orcamento_para_emitir",
@@ -18,6 +19,8 @@ export const MOTIVOS = [
   "lacuna_conhecimento",
   "outro",
 ] as const;
+
+const MOTIVOS_DE_DESIGN: MotivoTransferencia[] = ["ajuste_mockup", "arte_problematica"];
 
 export const transferirHumanoSchema = z.object({
   motivo: z.enum(MOTIVOS).describe("Motivo da transferência"),
@@ -47,6 +50,8 @@ export interface ResumoTransferencia {
   prioridade: "normal" | "alta";
   observacao?: string;
   produtos_discutidos: string[];
+  /** Opcional: resumo gravado em disco antes deste campo existir não pode travar a transferência. */
+  produtos_nomes?: string[];
   /** Estimativa confirmada pelo cliente, para o atendente emitir o orçamento (motivo orcamento_para_emitir). */
   ficha_pedido?: FichaPedido["resumo"];
   artes_registradas: string[];
@@ -101,11 +106,6 @@ export async function transferirHumanoHandler(
     adminResponsavel = { id: "desconhecido", name: "Equipe", email: "", phone: "" };
   }
 
-  const ultimasMensagens = state.historico
-    .slice(-4)
-    .map((m) => `[${m.role}]: ${m.content}`)
-    .join("\n");
-
   const resumo: ResumoTransferencia = {
     conversaId: state.conversaId,
     telefone_cliente: maskPhone(state.telefone),
@@ -114,10 +114,11 @@ export async function transferirHumanoHandler(
     prioridade: input.prioridade,
     observacao: input.observacao,
     produtos_discutidos: state.produtosDiscutidos,
+    produtos_nomes: nomesDosProdutos(state),
     ...(state.fichaPedido ? { ficha_pedido: state.fichaPedido.resumo } : {}),
     artes_registradas: state.artes.map((a) => a.arquivo),
     necessidade: state.necessidade,
-    ultimas_mensagens: ultimasMensagens,
+    ultimas_mensagens: ultimasMensagens(state),
     responsavel: {
       id: adminResponsavel.id,
       nome: adminResponsavel.name,
@@ -136,6 +137,20 @@ export async function transferirHumanoHandler(
     state.orcamentoEnviado = { ...state.fichaPedido.resumo, enviado_em: resumo.transferido_em };
   }
   state.fichaPedido = undefined;
+
+  if (MOTIVOS_DE_DESIGN.includes(input.motivo)) {
+    // Ajuste de arte também vai ao designer; o CRM fora não pode atrapalhar a transferência
+    try {
+      await encaminharParaDesign({
+        telefone: state.telefone,
+        origem: "LIA",
+        observacao: [input.motivo, input.observacao].filter(Boolean).join(": "),
+        arquivos: state.arquivosRecebidos ?? [],
+      });
+    } catch (err) {
+      console.warn(JSON.stringify({ type: "design_nao_encaminhado", motivo: input.motivo, erro: (err as Error).message }));
+    }
+  }
 
   return {
     status: "transferido",

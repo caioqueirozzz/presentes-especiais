@@ -4,7 +4,6 @@ import { translateApiError } from "../integrations/brindeme/errors.js";
 import type { ConversationState } from "../agent/state.js";
 import {
   localizarPedido,
-  FileOrderIndexStore,
   type OrderIndexStore,
 } from "../integrations/brindeme/orderIndex.js";
 import { traduzirStatusPedido } from "../knowledge/statusMap.js";
@@ -53,7 +52,7 @@ export function setOrderIndexStore(store: OrderIndexStore | null): void {
   storePadrao = store;
 }
 function getStore(): OrderIndexStore {
-  if (!storePadrao) storePadrao = new FileOrderIndexStore();
+  if (!storePadrao) throw new Error("store de pedidos não ligado: chame ligarStores(banco) na partida");
   return storePadrao;
 }
 
@@ -85,7 +84,7 @@ export async function consultarPedidoHandler(
   state.consultasPedido += 1;
 
   // Passos 2 e 3: localizar e validar ANTES de tocar na API.
-  const achado = localizarPedido(getStore(), {
+  const achado = await localizarPedido(getStore(), {
     codigo: input.codigo,
     telefone: state.telefone,
     email: input.email,

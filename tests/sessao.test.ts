@@ -10,22 +10,65 @@ const controle = vi.hoisted(() => ({
   lidFalha: false,
   envioRetorna: { id: "enviada" } as unknown,
   proprioLidErrado: false,
+  envios: [] as unknown[][],
+  midias: [] as unknown[][],
+  /** false simula o CDP caído: o destroy() da biblioteca volta sem fechar o Chrome (#29). */
+  destroyFechaNavegador: true,
+  inicializacaoFalha: false,
+  inicializacaoFalhaNaPartida: false,
+  /** true: o initialize() fica pendurado (página que não abre) e só rejeita quando o cliente é destruído. */
+  inicializacaoPendura: false,
+  chromesVivosAoLancar: [] as number[],
 }));
 
 vi.mock("whatsapp-web.js", async () => {
   const { EventEmitter } = await import("events");
+  function processoFalso() {
+    const p = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      signalCode: null as string | null,
+      sinais: [] as string[],
+      kill: (sinal: string) => {
+        p.sinais.push(sinal);
+        queueMicrotask(() => {
+          p.signalCode = sinal;
+          p.emit("exit");
+        });
+        return true;
+      },
+    });
+    return p;
+  }
   class ClienteFalso extends EventEmitter {
     info = { wid: { user: "5583900000000", _serialized: "5583900000000@c.us" } };
     pupPage = { evaluate: async () => true };
     destruido = false;
+    processo = processoFalso();
+    pupBrowser = { process: () => this.processo };
     constructor(public options: unknown) {
       super();
+      const vivos = (controle.clientes as ClienteFalso[]).filter(
+        (c) => c.processo.exitCode === null && c.processo.signalCode === null
+      );
+      controle.chromesVivosAoLancar.push(vivos.length);
       controle.clientes.push(this);
     }
-    async initialize() {}
+    rejeitarAbertura?: (err: Error) => void;
+    async initialize() {
+      if (controle.inicializacaoPendura) {
+        return new Promise<void>((_, rejeitar) => (this.rejeitarAbertura = rejeitar));
+      }
+      if (controle.inicializacaoFalhaNaPartida && controle.clientes.length === 1) throw new Error("TimeoutError: Waiting failed: 30000ms exceeded");
+      if (controle.inicializacaoFalha && controle.clientes.length > 1) {
+        throw new Error("The browser is already running for nunca-usado");
+      }
+    }
     async destroy() {
       this.destruido = true;
+      this.rejeitarAbertura?.(new Error("Navigating frame was detached"));
+      if (controle.destroyFechaNavegador) this.processo.exitCode = 0;
     }
+    async logout() {}
     async getState() {
       return controle.estado;
     }
@@ -39,7 +82,8 @@ vi.mock("whatsapp-web.js", async () => {
       }
       return [{ pn: "558399990000@c.us", lid: "123@lid" }];
     }
-    async sendMessage() {
+    async sendMessage(...args: unknown[]) {
+      controle.envios.push(args);
       return controle.envioRetorna;
     }
     async getChatById() {
@@ -55,7 +99,13 @@ vi.mock("whatsapp-web.js", async () => {
       };
     }
   }
-  return { default: { Client: ClienteFalso, LocalAuth: class {} } };
+  return {
+    default: {
+      Client: ClienteFalso,
+      LocalAuth: class {},
+      MessageMedia: { fromUrl: async (...args: unknown[]) => (controle.midias.push(args), { midia: args[0] }) },
+    },
+  };
 });
 
 import { CanalWwebjs } from "../src/whatsapp/sessao.js";
@@ -79,8 +129,8 @@ function msg(id: string, extra: Record<string, unknown> = {}) {
   };
 }
 
-async function montar(): Promise<CanalWwebjs> {
-  const canal = new CanalWwebjs({ sessaoDir: "nunca-usado", log: () => {} });
+async function montar(log: (e: Record<string, unknown>) => void = () => {}): Promise<CanalWwebjs> {
+  const canal = new CanalWwebjs({ sessaoDir: "nunca-usado", log });
   await canal.iniciar();
   clienteAtual().emit("ready");
   return canal;
@@ -96,6 +146,13 @@ describe("CanalWwebjs (biblioteca falsa)", () => {
     controle.lidFalha = false;
     controle.envioRetorna = { id: "enviada" };
     controle.proprioLidErrado = false;
+    controle.envios = [];
+    controle.midias = [];
+    controle.destroyFechaNavegador = true;
+    controle.inicializacaoFalha = false;
+    controle.inicializacaoFalhaNaPartida = false;
+    controle.inicializacaoPendura = false;
+    controle.chromesVivosAoLancar = [];
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -118,6 +175,13 @@ describe("CanalWwebjs (biblioteca falsa)", () => {
     antigo.emit("message_create", msg("eco-velho", { fromMe: true, from: "5583900000000@c.us", to: `${TEL}@c.us` }));
     await vi.advanceTimersByTimeAsync(0);
     expect(recebidas).toEqual([]);
+  });
+
+  it("foto: fromUrl com unsafeMime e sendMessage com caption, sem marcar como lida", async () => {
+    const canal = await montar();
+    await canal.enviarImagem(`${TEL}@c.us`, "https://cdn.brinde.me/x.webp", "*Caneca*");
+    expect(controle.midias).toEqual([["https://cdn.brinde.me/x.webp", { unsafeMime: true }]]);
+    expect(controle.envios.at(-1)).toEqual([`${TEL}@c.us`, { midia: "https://cdn.brinde.me/x.webp" }, { caption: "*Caneca*", sendSeen: false }]);
   });
 
   it("envio que a biblioteca devolve vazio (conversa não encontrada) vira erro", async () => {
@@ -157,6 +221,30 @@ describe("CanalWwebjs (biblioteca falsa)", () => {
     expect(controle.clientes).toHaveLength(2);
   });
 
+  it("abertura pendurada: a reconexão não derruba a partida e relança de novo se a nova também pendurar", async () => {
+    controle.inicializacaoPendura = true;
+    const eventos: Record<string, unknown>[] = [];
+    const canal = new CanalWwebjs({ sessaoDir: "nunca-usado", log: (e) => eventos.push(e) });
+    const partida = canal.iniciar();
+    await vi.advanceTimersByTimeAsync(121_000);
+    await expect(partida).resolves.toBeUndefined();
+    expect(controle.clientes).toHaveLength(2);
+    expect(eventos.some((e) => e.type === "abertura_substituida")).toBe(true);
+    await vi.advanceTimersByTimeAsync(121_000);
+    expect(controle.clientes).toHaveLength(3);
+    expect(console.error).not.toHaveBeenCalled();
+  });
+
+  it("abertura que falha na partida não derruba a ponte: o vigia relança", async () => {
+    controle.inicializacaoFalhaNaPartida = true;
+    const eventos: Record<string, unknown>[] = [];
+    const canal = new CanalWwebjs({ sessaoDir: "nunca-usado", log: (e) => eventos.push(e) });
+    await expect(canal.iniciar()).resolves.toBeUndefined();
+    expect(eventos.some((e) => e.type === "abertura_falhou")).toBe(true);
+    await vi.advanceTimersByTimeAsync(121_000);
+    expect(controle.clientes).toHaveLength(2);
+  });
+
   it("com o QR na tela esperando o celular, não relança", async () => {
     const canal = new CanalWwebjs({ sessaoDir: "nunca-usado", log: () => {} });
     await canal.iniciar();
@@ -184,6 +272,18 @@ describe("CanalWwebjs (biblioteca falsa)", () => {
     expect(recebidas[0]).toMatchObject({ id: "v1", tipo: "nao_suportada" });
     expect(recebidas[0].baixarMidia).toBeUndefined();
     expect(recebidas[1]).toMatchObject({ id: "d1", tipo: "midia", bytesDeclarados: 50_000_000 });
+  });
+
+  it("áudio (ptt) vem com baixarMidia: sem ele a ponte não transcreve nem manda ao CRM", async () => {
+    const canal = await montar();
+    const recebidas: Array<Record<string, unknown>> = [];
+    canal.aoMensagem((m) => recebidas.push(m as unknown as Record<string, unknown>));
+    const downloadMedia = async () => ({ mimetype: "audio/ogg; codecs=opus", data: "T2dnUw==" });
+    clienteAtual().emit("message_create", msg("p1", { type: "ptt", body: "", downloadMedia }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recebidas[0]).toMatchObject({ id: "p1", tipo: "audio" });
+    const baixar = recebidas[0].baixarMidia as () => Promise<unknown>;
+    expect(await baixar()).toEqual({ mime: "audio/ogg; codecs=opus", base64: "T2dnUw==" });
   });
 
   it("escuta só message_create; chat da própria vem de to, da recebida de from; @lid resolvido", async () => {
@@ -239,6 +339,39 @@ describe("CanalWwebjs (biblioteca falsa)", () => {
     expect(pedidos).toEqual([{ limit: 120, fromMe: false }]);
   });
 
+  it("envio sem marcar como lida e sem prévia de link (e-mail virava prévia de site)", async () => {
+    const canal = await montar();
+    await canal.enviar(`${TEL}@c.us`, "seu e-mail é teste@empresa.com");
+    expect(controle.envios).toEqual([[`${TEL}@c.us`, "seu e-mail é teste@empresa.com", { sendSeen: false, linkPreview: false }]]);
+  });
+
+  it("[#30] mensagem sem id ao vivo não é entregue e vai para o log com o tipo", async () => {
+    const eventos: Record<string, unknown>[] = [];
+    const canal = await montar((e) => eventos.push(e));
+    const recebidas: unknown[] = [];
+    canal.aoMensagem((m) => recebidas.push(m));
+    clienteAtual().emit("message_create", msg("x", { id: {} }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recebidas).toHaveLength(0);
+    expect(eventos).toContainEqual({ type: "mensagem_nao_convertida", erro: "Error: mensagem sem id (tipo chat)" });
+  });
+
+  it("[#30] varredura descarta a mensagem sem id e entrega as outras", async () => {
+    const eventos: Record<string, unknown>[] = [];
+    const canal = await montar((e) => eventos.push(e));
+    controle.chats = [
+      {
+        id: { _serialized: `${TEL}@c.us` },
+        isGroup: false,
+        unreadCount: 2,
+        fetchMessages: async () => [msg("sem", { id: {} }), msg("boa")],
+      },
+    ];
+    const pendentes = await canal.pendentes();
+    expect(pendentes[0].mensagens.map((m) => m.id)).toEqual(["boa"]);
+    expect(eventos).toContainEqual({ type: "mensagem_nao_convertida", erro: "Error: mensagem sem id (tipo chat)" });
+  });
+
   it("[F13] desconectado com UNPAIRED e getState indisponível: não relança nem gera QR", async () => {
     await montar();
     controle.estado = null;
@@ -262,6 +395,64 @@ describe("CanalWwebjs (biblioteca falsa)", () => {
     clienteAtual().emit("disconnected", "NAVIGATION");
     await vi.advanceTimersByTimeAsync(6_000);
     expect(controle.clientes).toHaveLength(2);
+  });
+
+  it("[#29] Chrome que sobrevive ao destroy() é morto antes de lançar o cliente novo", async () => {
+    await montar();
+    controle.estado = null;
+    controle.destroyFechaNavegador = false;
+    const antigo = clienteAtual() as unknown as { processo: { sinais: string[] } };
+    clienteAtual().emit("disconnected", "NAVIGATION");
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(antigo.processo.sinais).toEqual(["SIGKILL"]);
+    expect(controle.clientes).toHaveLength(2);
+    expect(controle.chromesVivosAoLancar.at(-1)).toBe(0);
+  });
+
+  it("[#29] kill que lança (Windows: EACCES no meio da saída) não derruba a reconexão", async () => {
+    const eventos: Record<string, unknown>[] = [];
+    await montar((e) => eventos.push(e));
+    controle.estado = null;
+    controle.destroyFechaNavegador = false;
+    const antigo = clienteAtual() as unknown as { processo: { kill: () => boolean } };
+    antigo.processo.kill = () => {
+      throw new Error("kill EACCES");
+    };
+    clienteAtual().emit("disconnected", "NAVIGATION");
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(controle.clientes).toHaveLength(2);
+    expect(eventos).toContainEqual({ type: "chrome_nao_morreu", erro: "Error: kill EACCES" });
+  });
+
+  it("[#29] nova vinculação do CRM também mata o Chrome que sobrevive ao destroy()", async () => {
+    const canal = await montar();
+    controle.destroyFechaNavegador = false;
+    const antigo = clienteAtual() as unknown as { processo: { sinais: string[] } };
+    await canal.novaVinculacao();
+    expect(antigo.processo.sinais).toEqual(["SIGKILL"]);
+    expect(controle.clientes).toHaveLength(2);
+    expect(controle.chromesVivosAoLancar.at(-1)).toBe(0);
+  });
+
+  it("[#29] Chrome que o destroy() fechou não leva SIGKILL", async () => {
+    await montar();
+    controle.estado = null;
+    const antigo = clienteAtual() as unknown as { processo: { sinais: string[] } };
+    clienteAtual().emit("disconnected", "NAVIGATION");
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(antigo.processo.sinais).toEqual([]);
+    expect(controle.clientes).toHaveLength(2);
+  });
+
+  it("[#29] reconexão que falha avisa no terminal e no log", async () => {
+    const eventos: Record<string, unknown>[] = [];
+    await montar((e) => eventos.push(e));
+    controle.estado = null;
+    controle.inicializacaoFalha = true;
+    clienteAtual().emit("disconnected", "NAVIGATION");
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(eventos.some((e) => e.type === "reconexao_falhou")).toBe(true);
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("🚨 Reconexão do WhatsApp falhou"));
   });
 
   it("[F15] digitando acaba em até 4s", async () => {

@@ -3,7 +3,11 @@ import type { BrindeMeClient } from "../integrations/brindeme/client.js";
 import { translateApiError } from "../integrations/brindeme/errors.js";
 import { arredondar } from "../integrations/brindeme/mappers.js";
 import type { ConversationState } from "../agent/state.js";
-import { marcaUltimaMensagemCliente, type FichaPedido } from "../agent/state.js";
+import { cotacaoValida, cotarAoVivo, cotou, guardarCotacoes, type Cotacao } from "../catalogo/cotacao.js";
+import { ehSobDemanda } from "../catalogo/sobDemanda.js";
+import { normalizar } from "../busca/texto.js";
+import { SEM_ESTOQUE_OFERECA_HUMANO } from "./cartao.js";
+import { lembrarDetalhado, marcaUltimaMensagemCliente, type FichaPedido } from "../agent/state.js";
 
 // Sem CPF, CNPJ nem endereço: quem emite o orçamento coleta no fechamento (decisão de 25/10, LGPD).
 export const prepararOrcamentoSchema = z.object({
@@ -12,6 +16,7 @@ export const prepararOrcamentoSchema = z.object({
   email: z.string().email().describe("E-mail válido do cliente"),
   itens: z.array(z.object({
     subproduto_id: z.string(),
+    cor: z.string().max(60).optional().describe("Cor que o cliente pediu, como aparece na lista de cores (ex.: 'Preto'); o código confere com o subproduto_id"),
     quantidade: z.number().int().min(1),
   })).min(1).max(100),
   prazo_desejado: z.string().max(100).optional().describe("Prazo nas palavras do cliente, sem converter para data (ex.: 'até 20/11'); omita se ele não disse"),
@@ -22,7 +27,14 @@ export const prepararOrcamentoSchema = z.object({
 export type PrepararOrcamentoInput = z.infer<typeof prepararOrcamentoSchema>;
 
 export const AVISO_ESTIMATIVA =
-  "Valor de tabela com personalização padrão. Personalização fora do padrão, frete e prazo a equipe confirma ao emitir o orçamento.";
+  "Valor do site com personalização padrão. Personalização fora do padrão, frete e prazo a equipe confirma ao emitir o orçamento.";
+
+export const reais = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+/** A mesma linha vai ao cliente e à ficha da equipe: os dois veem o mesmo produto e a mesma cor. */
+export function linhaDoItem(i: FichaPedido["resumo"]["itens"][number]): string {
+  return `• ${i.quantidade}× ${i.nome_produto}${i.cor ? ` (${i.cor})` : ""} — ${reais(i.preco_unitario)} cada = ${reais(i.subtotal)}`;
+}
 
 export async function prepararOrcamentoHandler(
   input: PrepararOrcamentoInput,
@@ -36,23 +48,38 @@ export async function prepararOrcamentoHandler(
     // Cache por produto: vários itens podem vir do mesmo produto.
     const cache = new Map<string, Awaited<ReturnType<typeof client.getProduct>>>();
 
-    for (const item of input.itens) {
+    for (const pedido of input.itens) {
+      const item = { ...pedido };
       // A listagem não traz subprodutos, então não dá para varrer o catálogo:
       // o produto de origem vem do mapa preenchido por buscar/detalhar.
-      const produtoId = state.subprodutoParaProduto[item.subproduto_id];
+      let produtoId = state.subprodutoParaProduto[item.subproduto_id];
       // buscar_produtos só mostra o id do produto; o modelo às vezes manda esse no lugar da cor.
       if (!produtoId && state.produtosDiscutidos.includes(item.subproduto_id)) {
         const produto = await client.getProduct(item.subproduto_id);
         for (const s of produto.subproducts) state.subprodutoParaProduto[s.id] = produto.id;
-        return {
-          erro: "informe_a_cor",
-          produto: produto.name,
-          opcoes: produto.subproducts
-            .filter((s) => s.status && s.stock > 0)
-            .map((s) => ({ subproduto_id: s.id, cor: s.color, estoque: s.stock })),
-          instrucao:
-            "Esse id é do produto, não da cor. Use o subproduto_id da cor que o cliente pediu; se ele aceitou qualquer cor, use uma com estoque que cubra a quantidade; se ele não disse, pergunte. Depois chame preparar_orcamento de novo.",
-        };
+        // Resultado de ferramenta some no turno seguinte: sem isto, o "Aceito" do cliente voltava ao id do produto (#28).
+        lembrarDetalhado(state, {
+          id: produto.id,
+          nome: produto.name,
+          cores: produto.subproducts.filter((s) => s.status).map((s) => ({ subproduto_id: s.id, cor: s.color })),
+        });
+        const opcoes = produto.subproducts
+          .filter((s) => s.status && (ehSobDemanda(produto.id) || s.stock > 0))
+          .map((s) => ({ subproduto_id: s.id, cor: s.color, estoque: s.stock }));
+        const cobrem = opcoes.filter((o) => ehSobDemanda(produto.id) || o.estoque >= item.quantidade);
+        // Uma cor só, ou só uma cobre a quantidade: não há o que perguntar (loop de "confirma a cor?" no dogfooding de 09/11).
+        const unica = opcoes.length === 1 ? opcoes[0] : cobrem.length === 1 ? cobrem[0] : undefined;
+        if (!unica) {
+          return {
+            erro: "informe_a_cor",
+            produto: produto.name,
+            opcoes,
+            instrucao:
+              "Esse id é do produto, não da cor. Use o subproduto_id da cor que o cliente pediu; se ele aceitou qualquer cor, use uma com estoque que cubra a quantidade; se ele não disse, pergunte. Depois chame preparar_orcamento de novo.",
+          };
+        }
+        item.subproduto_id = unica.subproduto_id;
+        produtoId = produto.id;
       }
       if (!produtoId) {
         return {
@@ -69,9 +96,23 @@ export async function prepararOrcamentoHandler(
         cache.set(produtoId, p);
       }
 
-      const sub = p.subproducts.find((x) => x.id === item.subproduto_id);
+      let sub = p.subproducts.find((x) => x.id === item.subproduto_id);
       if (!sub) {
         return { erro: "subproduto_nao_encontrado", subproduto_id: item.subproduto_id };
+      }
+      // O modelo copia o UUID da cor vizinha na lista (teste de 19/11): a cor em texto decide
+      if (pedido.cor && normalizar(pedido.cor) !== normalizar(sub.color)) {
+        const daCor = p.subproducts.find((x) => x.status && normalizar(x.color) === normalizar(pedido.cor!));
+        if (!daCor) {
+          return {
+            erro: "cor_nao_encontrada",
+            cor_pedida: pedido.cor,
+            cores_disponiveis: p.subproducts.filter((x) => x.status).map((x) => x.color),
+            instrucao: "Essa cor não existe neste produto. Ofereça ao cliente as cores_disponiveis e chame preparar_orcamento de novo com a que ele escolher.",
+          };
+        }
+        sub = daCor;
+        item.subproduto_id = daCor.id;
       }
       // Produto desativado na loja com a cor ainda ativa: buscar_produtos já não o sugere, o orçamento também não.
       if (!p.status) {
@@ -88,7 +129,10 @@ export async function prepararOrcamentoHandler(
           mensagem: `O subproduto "${sub.color}" de "${p.name}" está inativo.`,
         };
       }
-      if (sub.stock < item.quantidade) {
+      if (!ehSobDemanda(p.id) && sub.stock < item.quantidade) {
+        const coresQueAtendem = p.subproducts
+          .filter((s) => s.status && s.stock >= item.quantidade)
+          .map((s) => ({ subproduto_id: s.id, cor: s.color }));
         // Sem a cor e as alternativas, o modelo chutava a cor no texto e inventava outra quantidade (25/10).
         return {
           erro: "estoque_insuficiente",
@@ -96,11 +140,10 @@ export async function prepararOrcamentoHandler(
           cor: sub.color,
           estoque_disponivel: sub.stock,
           quantidade_solicitada: item.quantidade,
-          cores_que_atendem: p.subproducts
-            .filter((s) => s.status && s.stock >= item.quantidade)
-            .map((s) => ({ subproduto_id: s.id, cor: s.color })),
-          instrucao:
-            "Diga ao cliente qual cor não tem estoque. Se ele aceitou qualquer cor, prepare de novo com uma de cores_que_atendem; senão, ofereça essas cores. Nunca mude a quantidade sem ele pedir.",
+          cores_que_atendem: coresQueAtendem,
+          instrucao: coresQueAtendem.length
+            ? "Diga ao cliente qual cor não tem estoque. Se ele aceitou qualquer cor, prepare de novo com uma de cores_que_atendem; senão, ofereça essas cores. Nunca mude a quantidade sem ele pedir."
+            : `Nenhuma cor tem estoque para essa quantidade. ${SEM_ESTOQUE_OFERECA_HUMANO} Nunca mude a quantidade sem ele pedir.`,
         };
       }
       if (item.quantidade < p.min_quantity) {
@@ -112,21 +155,18 @@ export async function prepararOrcamentoHandler(
         };
       }
 
-      const range = sub.prices.find(
-        (r) => item.quantidade >= r.min && item.quantidade <= r.max
-      );
-      // O preço de referência do produto só vale para cor SEM tabela (relatorio-campos-api.md).
-      // Com tabela e a quantidade fora de todas as faixas, o resumo mostraria um preço que a loja não pratica.
-      if (!range && sub.prices.length > 0) {
+      const cotacao = cotacaoValida(state, item.subproduto_id, item.quantidade) ?? (await cotarUma(client, state, item.subproduto_id, item.quantidade));
+      if (!cotacao || cotacao.centavos === 0) {
         return {
-          erro: "sem_faixa_de_preco",
+          erro: "preco_indisponivel",
           subproduto_id: item.subproduto_id,
           quantidade_solicitada: item.quantidade,
-          faixas: sub.prices.map((r) => ({ min: r.min, max: r.max })),
-          instrucao: "A quantidade não está em nenhuma faixa de preço desta cor. Ofereça uma quantidade dentro das faixas ou transfira.",
+          instrucao: "transferir",
+          motivo_sugerido: "outro",
+          mensagem: "O site não deu o preço desta cor nesta quantidade: quem fecha o valor é a equipe.",
         };
       }
-      const price = range?.price ?? p.price;
+      const price = cotacao.centavos / 100;
 
       const subtotal = arredondar(price * item.quantidade);
       totalEstimado = arredondar(totalEstimado + subtotal);
@@ -146,7 +186,7 @@ export async function prepararOrcamentoHandler(
       anterior !== undefined &&
       anterior.resumo.tipo === input.tipo &&
       anterior.resumo.email.trim().toLowerCase() === input.email.trim().toLowerCase() &&
-      chaveDosItens(anterior.resumo.itens) === chaveDosItens(input.itens);
+      chaveDosItens(anterior.resumo.itens) === chaveDosItens(itensSumario);
 
     // Já mostrada e o cliente respondeu: vai à equipe a ficha que ele viu, não a reescrita (20/11 virou 2023-11-20),
     // e pedir confirmação de novo prendia o cliente num laço de "pode enviar" (conversas reais de 25/10).
@@ -185,8 +225,14 @@ export async function prepararOrcamentoHandler(
       status: "estimativa_pronta",
       resumo: ficha.resumo,
       aviso: AVISO_ESTIMATIVA,
+      // Pronto e literal: o modelo reescrevia o produto pedido no lugar do estimado, tirava a cor e trocava palavras do aviso (#26).
+      resumo_para_cliente: [
+        ...itensSumario.map(linhaDoItem),
+        `Total estimado: ${reais(totalEstimado)}`,
+        `_${AVISO_ESTIMATIVA}_`,
+      ].join("\n"),
       instrucao:
-        'Mostre o resumo e o aviso ao cliente e pergunte se pode enviar para a equipe emitir o orçamento. Com a confirmação dele numa nova mensagem, chame transferir_humano com motivo "orcamento_para_emitir".',
+        'Mostre resumo_para_cliente ao cliente exatamente como veio, sem reescrever produto, cor, valores nem o aviso, e pergunte se pode enviar para a equipe emitir o orçamento. Com a confirmação dele numa nova mensagem, chame transferir_humano com motivo "orcamento_para_emitir".',
     };
   } catch (err) {
     return { erro: translateApiError(err) };
@@ -195,4 +241,10 @@ export async function prepararOrcamentoHandler(
 
 function chaveDosItens(itens: Array<{ subproduto_id: string; quantidade: number }>): string {
   return itens.map((i) => `${i.subproduto_id}:${i.quantidade}`).sort().join("|");
+}
+
+async function cotarUma(client: BrindeMeClient, state: ConversationState, subprodutoId: string, quantidade: number): Promise<Cotacao | undefined> {
+  const [r] = await cotarAoVivo(client, [{ subprodutoId, quantidade }]);
+  guardarCotacoes(state, [r]);
+  return cotou(r) ? r : undefined;
 }

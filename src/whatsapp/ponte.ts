@@ -1,5 +1,6 @@
 import {
   LIMITE_TEXTO,
+  type ItemResposta,
   type MensagemLote,
   type PedidoMensagens,
   type RespostaMensagens,
@@ -9,12 +10,16 @@ import type { ClienteAgente, ResultadoLote } from "./agenteHttp.js";
 import { Atendimento } from "./atendente.js";
 import type { CanalWhatsApp, MensagemRecebida, MidiaBaixada } from "./canal.js";
 import { Envio, esperar } from "./envio.js";
-import { MemoriaEstadoPonte, type ArmazemPonte, type EntregaParcial } from "./estadoPonte.js";
+import { estadoVazio, MemoriaEstadoPonte, type ArmazemPonte, type EntregaParcial, type EstadoPonte } from "./estadoPonte.js";
 import { ConjuntoLimitado, FilaConversas, type OpcoesFila } from "./fila.js";
+import { logarErroBanco } from "../db/banco.js";
 import type { LogPonte } from "./log.js";
 import { salvarMidia, TAMANHO_MAXIMO_BYTES } from "./midia.js";
 import { iaAtende, type ConfigLia } from "./modoLia.js";
 import { normalizarTelefone } from "./telefone.js";
+import type { Transcritor } from "./transcricao.js";
+
+const mesmaParte = (a: ItemResposta | undefined, b: ItemResposta) => JSON.stringify(a) === JSON.stringify(b);
 
 export const ESPERA_EM_ANDAMENTO_MS = 5_000;
 export const LIMITE_EM_ANDAMENTO_MS = 120_000;
@@ -26,7 +31,8 @@ const SALVAR_APOS_MS = 300;
 const CONCLUIDOS_GUARDADOS = 2_000;
 const ENTREGAS_PARCIAIS_GUARDADAS = 200;
 
-export const MSG_AUDIO = "Ainda não consigo ouvir áudios por aqui 🙏 Pode me mandar por escrito?";
+export const MSG_AUDIO_FALHOU = "Não consegui ouvir seu áudio direito. Pode me mandar por escrito?";
+const AUDIOS_POR_HORA = 20;
 export const MSG_INSTABILIDADE = "Estamos com uma instabilidade agora, mas já te respondemos por aqui. 🙏";
 const RECUSA_VIDEO = "[arquivo recusado: vídeo, formato não aceito (aceitos: PNG, JPG, SVG, PDF)]";
 
@@ -46,11 +52,23 @@ export interface MensagemObservada {
   timestamp: string;
 }
 
+/** O áudio do cliente, com o resultado da transcrição, para o CRM guardar e tocar. */
+export interface MidiaObservada {
+  id: string;
+  telefone: string;
+  mime: string;
+  base64: string;
+  transcricao: string | null;
+  status: "OK" | "FALHOU" | "NAO_TRANSCRITO";
+}
+
 /** Quem acompanha a ponte de fora (o CRM). Chamadas sem esperar: a ponte nunca trava por causa dele. */
 export interface ObservadorPonte {
   mensagem(m: MensagemObservada): void;
   /** O agente terminou (ou desistiu de) um lote desta conversa: o estado dela pode ter mudado. */
   conversaAtualizada(telefone: string): void;
+  /** O áudio de uma mensagem já observada; chega depois dela. */
+  midia?(m: MidiaObservada): void;
 }
 
 export interface OpcoesPonte {
@@ -61,7 +79,11 @@ export interface OpcoesPonte {
   enviosPorMinuto: number;
   /** Onde a ponte guarda o que precisa lembrar depois de reiniciar (padrão: só memória). */
   armazem?: ArmazemPonte;
+  /** Estado lido do armazém antes de montar a ponte: o construtor não espera o banco. */
+  estadoInicial?: EstadoPonte;
   observador?: ObservadorPonte;
+  /** Sem transcritor, todo áudio com a IA é tratado como falha de transcrição. */
+  transcritor?: Transcritor;
 }
 
 /** entregue: tudo saiu · vazio: o agente não respondeu nada · descartado: o atendente assumiu · pendente: repetir depois */
@@ -97,11 +119,15 @@ export class Ponte {
   private readonly atendimento: Atendimento;
   private readonly armazem: ArmazemPonte;
   private readonly concluidos = new ConjuntoLimitado(5_000);
+  private readonly audiosObservados = new ConjuntoLimitado(2_000);
+  /** Áudios já transcritos sem sucesso: se o aviso não saiu, a varredura só reenvia o aviso. */
+  private readonly audiosSemTexto = new ConjuntoLimitado(500);
+  private readonly audiosTranscritos = new Map<string, number[]>();
   /** Ids sendo tratados fora da fila (aviso de áudio): a outra via que trouxer o mesmo id desiste. */
   private readonly reservados = new Set<string>();
   /** Pedidos que falharam ou não terminaram de sair, na ordem; voltam antes de qualquer lote novo da conversa. */
   private readonly aRepetir = new Map<string, PedidoMensagens[]>();
-  /** Gravado em disco a cada parte enviada: depois de reiniciar, o que já chegou ao cliente não sai de novo. */
+  /** Gravado no banco a cada parte enviada: depois de reiniciar, o que já chegou ao cliente não sai de novo. */
   private readonly entregasParciais: Map<string, EntregaParcial>;
   private avisosPendentes: string[];
   private readonly liberados: Set<string>;
@@ -110,6 +136,8 @@ export class Ponte {
   private queda: { desde: number; alertado: boolean; avisados: Set<string> } | null = null;
   private varrendo = false;
   private salvamento: ReturnType<typeof setTimeout> | undefined;
+  /** Cadeia das gravações: uma antiga não chega ao banco depois da nova. */
+  private gravacao: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly canal: CanalWhatsApp,
@@ -118,7 +146,7 @@ export class Ponte {
     private readonly log: LogPonte = () => {}
   ) {
     this.armazem = opcoes.armazem ?? new MemoriaEstadoPonte();
-    const salvo = this.armazem.carregar();
+    const salvo = opcoes.estadoInicial ?? estadoVazio();
     for (const id of salvo.concluidos) this.concluidos.add(id);
     this.avisosPendentes = [...salvo.avisosPendentes];
     this.entregasParciais = new Map(Object.entries(salvo.entregasParciais ?? {}));
@@ -159,9 +187,15 @@ export class Ponte {
     }
   }
 
-  /** Devolve a conversa à IA a pedido de fora (o CRM), como o #devolver digitado no chip. */
-  devolverParaIa(telefone: string, nota?: string): Promise<void> {
-    return this.atendimento.devolver(normalizarTelefone(telefone), nota, "pelo CRM");
+  /**
+   * Devolve a conversa à IA a pedido de fora (o CRM), como o #devolver digitado no chip. consumidas são
+   * mensagens do cliente que o CRM já tratou (o "APROVO" da arte): saem da fila e não chegam à IA.
+   */
+  devolverParaIa(telefone: string, nota?: string, consumidas: string[] = []): Promise<void> {
+    const tel = normalizarTelefone(telefone);
+    for (const id of consumidas) this.fila.cancelar(tel, id);
+    if (consumidas.length) this.concluir(consumidas);
+    return this.atendimento.devolver(tel, nota, "pelo CRM");
   }
 
   /**
@@ -173,7 +207,8 @@ export class Ponte {
     if (!observador || !m.direta || !m.telefone || m.paraMim || m.tipo === "ignorada") return;
     const autor: AutorMensagem = !m.deMim ? "CLIENTE" : this.envio.seriaMinha(m.telefone, m.texto) ? "AGENTE" : "ATENDENTE";
     try {
-      observador.mensagem({ id: m.id, telefone: m.telefone, autor, tipo: m.tipo, texto: m.texto, timestamp: m.timestamp });
+      const foto = m.deMim ? this.envio.imagemDe(m.telefone, m.texto) : undefined;
+      observador.mensagem({ id: m.id, telefone: m.telefone, autor, tipo: m.tipo, texto: foto ? `${m.texto}\n${foto}` : m.texto, timestamp: m.timestamp });
     } catch (err) {
       this.log({ type: "observador_falhou", erro: String(err) });
     }
@@ -201,39 +236,44 @@ export class Ponte {
   }
 
   /** Grava o estado já (na saída do processo); no dia a dia ele é gravado logo depois de cada mudança. */
-  salvarAgora(): void {
+  salvarAgora(): Promise<void> {
     if (this.salvamento) clearTimeout(this.salvamento);
     this.salvamento = undefined;
     const { modos, pendentes } = this.atendimento.instantaneo();
-    try {
-      this.armazem.salvar({
-        versao: 1,
-        modos,
-        eventosPendentes: pendentes,
-        avisosPendentes: [...this.avisosPendentes],
-        concluidos: this.concluidos.valores().slice(-CONCLUIDOS_GUARDADOS),
-        entregasParciais: Object.fromEntries([...this.entregasParciais].slice(-ENTREGAS_PARCIAIS_GUARDADAS)),
+    const estado: EstadoPonte = {
+      versao: 1,
+      modos,
+      eventosPendentes: pendentes,
+      avisosPendentes: [...this.avisosPendentes],
+      concluidos: this.concluidos.valores().slice(-CONCLUIDOS_GUARDADOS),
+      entregasParciais: Object.fromEntries([...this.entregasParciais].slice(-ENTREGAS_PARCIAIS_GUARDADAS)),
+    };
+    this.gravacao = this.gravacao
+      .then(() => this.armazem.salvar(estado))
+      .catch((err) => {
+        try {
+          this.log({ type: "estado_nao_salvo", ...logarErroBanco(err) });
+        } catch {
+          // logger com defeito não pode deixar a cadeia rejeitada
+        }
       });
-    } catch (err) {
-      this.log({ type: "estado_nao_salvo", erro: String(err) });
-    }
+    return this.gravacao;
   }
 
   private agendarSalvar(): void {
     if (this.salvamento) return;
-    this.salvamento = setTimeout(() => this.salvarAgora(), SALVAR_APOS_MS);
+    this.salvamento = setTimeout(() => void this.salvarAgora(), SALVAR_APOS_MS);
   }
 
   private async receberDoCliente(m: MensagemRecebida): Promise<void> {
     if (!m.direta || !m.telefone || this.concluidos.has(m.id) || this.reservados.has(m.id)) return;
-    if (!this.iaAtende(m.telefone)) return;
     const telefone = m.telefone;
+    if (m.tipo === "audio") return this.receberAudio(telefone, m);
+    if (!this.iaAtende(telefone)) return;
 
-    if (m.tipo === "audio" || m.tipo === "ignorada") {
+    if (m.tipo === "ignorada") {
       this.reservados.add(m.id);
       try {
-        const comIa = this.atendimento.modo(telefone) === "ia";
-        if (m.tipo === "audio" && comIa && !(await this.envio.paraCliente(telefone, m.chatId, MSG_AUDIO))) return;
         this.concluir([m.id]);
         if (this.podeMarcarLida(telefone, false)) await this.marcarComoLida(m.chatId);
       } finally {
@@ -254,19 +294,106 @@ export class Ponte {
     this.fila.adicionar(telefone, m.chatId, { id: m.id, timestamp: m.timestamp, texto, ...nomeDoContato(m) });
   }
 
+  /** Todo áudio do cliente vai ao CRM uma vez, transcrito; só com a IA atendendo ele entra no lote. */
+  /** Cada transcrição custa no Whisper. shortcut: cota só em memória, zera ao reiniciar a ponte; ir para o banco se aparecer abuso real. */
+  private dentroDaCota(telefone: string): boolean {
+    const agora = Date.now();
+    const recentes = (this.audiosTranscritos.get(telefone) ?? []).filter((t) => agora - t < 3_600_000);
+    const cabe = recentes.length < AUDIOS_POR_HORA;
+    if (cabe) recentes.push(agora);
+    else this.log({ type: "audio_cota_excedida", telefone });
+    this.audiosTranscritos.set(telefone, recentes);
+    return cabe;
+  }
+
+  private async transcrever(telefone: string, midia: MidiaBaixada): Promise<string | null> {
+    if (!this.opcoes.transcritor || !this.dentroDaCota(telefone)) return null;
+    return this.opcoes.transcritor.transcrever(Buffer.from(midia.base64, "base64"), midia.mime);
+  }
+
+  private async receberAudio(telefone: string, m: MensagemRecebida): Promise<void> {
+    const comIa = this.iaAtende(telefone) && this.atendimento.modo(telefone) === "ia";
+    if (!comIa) {
+      if (this.opcoes.observador?.midia && !this.audiosObservados.has(m.id)) {
+        this.audiosObservados.add(m.id);
+        const midia = await this.baixarAudio(m);
+        // Download que falhou fica livre para a próxima varredura: é o player que o atendente vai usar
+        if (midia) {
+          const texto = await this.transcrever(telefone, midia);
+          this.observarMidia(telefone, m.id, midia, texto, texto ? "OK" : "FALHOU");
+        } else this.audiosObservados.delete(m.id);
+      }
+      if (!this.iaAtende(telefone)) return;
+      this.concluir([m.id]);
+      if (this.podeMarcarLida(telefone, false)) await this.marcarComoLida(m.chatId);
+      return;
+    }
+
+    if (!this.audiosSemTexto.has(m.id)) {
+      // Reservado antes do download para o áudio não chegar depois do texto que veio atrás dele
+      if (!this.fila.reservar(telefone, m.chatId, m.id)) return;
+      const midia = await this.baixarAudio(m);
+      const texto = midia ? await this.transcrever(telefone, midia) : null;
+      if (midia && !this.audiosObservados.has(m.id)) {
+        this.audiosObservados.add(m.id);
+        this.observarMidia(telefone, m.id, midia, texto, texto ? "OK" : "FALHOU");
+      }
+      if (texto) {
+        this.fila.preencher(telefone, m.id, { id: m.id, timestamp: m.timestamp, texto: neutralizarMarcadores(texto).slice(0, LIMITE_TEXTO), ...nomeDoContato(m) });
+        return;
+      }
+      this.fila.cancelar(telefone, m.id);
+      this.audiosSemTexto.add(m.id);
+    }
+    this.reservados.add(m.id);
+    try {
+      // Aviso que não sai: não conclui, e a varredura tenta de novo
+      if (!(await this.envio.paraCliente(telefone, m.chatId, MSG_AUDIO_FALHOU))) return;
+      this.concluir([m.id]);
+      if (this.podeMarcarLida(telefone, false)) await this.marcarComoLida(m.chatId);
+    } finally {
+      this.reservados.delete(m.id);
+    }
+  }
+
+  /** Baixa a mídia no prazo e no teto; null quando não deu (o motivo vai ao log). */
+  private async baixar(m: MensagemRecebida): Promise<MidiaBaixada | null> {
+    if (m.bytesDeclarados !== undefined && m.bytesDeclarados > TAMANHO_MAXIMO_BYTES) return null;
+    try {
+      return await comPrazo(m.baixarMidia?.() ?? Promise.resolve(null), PRAZO_DOWNLOAD_MS, null);
+    } catch (err) {
+      this.log({ type: "midia_nao_baixou", id: m.id, erro: String(err) });
+      return null;
+    }
+  }
+
+  /** O áudio sem tamanho declarado só é medido depois de baixado: acima do teto, nem Whisper nem CRM. */
+  private async baixarAudio(m: MensagemRecebida): Promise<MidiaBaixada | null> {
+    const midia = await this.baixar(m);
+    if (midia && Buffer.byteLength(midia.base64, "base64") > TAMANHO_MAXIMO_BYTES) {
+      this.log({ type: "audio_grande_demais", id: m.id });
+      return null;
+    }
+    return midia;
+  }
+
+  private observarMidia(telefone: string, id: string, midia: MidiaBaixada, transcricao: string | null, status: MidiaObservada["status"]): void {
+    try {
+      this.opcoes.observador?.midia?.({ id, telefone, mime: midia.mime, base64: midia.base64, transcricao, status });
+    } catch (err) {
+      this.log({ type: "observador_falhou", erro: String(err) });
+    }
+  }
+
   private async mensagemDeMidia(telefone: string, m: MensagemRecebida): Promise<MensagemLote> {
     const legenda = neutralizarMarcadores(m.texto).trim();
     const recusa = (motivo: string): MensagemLote => ({ id: m.id, timestamp: m.timestamp, texto: juntar(motivo, legenda) });
     if (m.bytesDeclarados !== undefined && m.bytesDeclarados > TAMANHO_MAXIMO_BYTES) {
       return recusa("[arquivo recusado: arquivo, maior que 16 MB]");
     }
-    let midia: MidiaBaixada | null = null;
-    try {
-      midia = await comPrazo(m.baixarMidia?.() ?? Promise.resolve(null), PRAZO_DOWNLOAD_MS, null);
-    } catch (err) {
-      this.log({ type: "midia_nao_baixou", id: m.id, erro: String(err) });
-    }
-    if (!midia) return recusa("[arquivo recusado: arquivo, não foi possível baixar]");
+    const midia = await this.baixar(m);
+    // Falha nossa, não do arquivo: sem dizer isso o agente culpava o formato (#25).
+    if (!midia) return recusa("[arquivo recusado: arquivo, não chegou por falha nossa ao baixar; não é o formato]");
     const salvo = salvarMidia(this.opcoes.artesDir, telefone, m.id, midia);
     if (!salvo.ok) return recusa(`[arquivo recusado: ${salvo.nome}, ${salvo.motivo}]`);
     return { id: m.id, timestamp: m.timestamp, texto: legenda.slice(0, LIMITE_TEXTO), arquivo: salvo.arquivo };
@@ -377,7 +504,7 @@ export class Ponte {
 
     // Lote reagrupado depois de reiniciar: a resposta começa pelas partes do turno antigo, já entregues em parte.
     let jaSaiu = 0;
-    while (parcial && jaSaiu < parcial.partes.length && resposta.respostas[jaSaiu] === parcial.partes[jaSaiu]) jaSaiu++;
+    while (parcial && jaSaiu < parcial.partes.length && mesmaParte(resposta.respostas[jaSaiu], parcial.partes[jaSaiu])) jaSaiu++;
     for (let i = jaSaiu; i < resposta.respostas.length; i++) {
       const saiu = await this.envio.paraCliente(telefone, chatId, resposta.respostas[i], () => !assumiu());
       if (assumiu()) return descartar();
@@ -386,7 +513,7 @@ export class Ponte {
         return "pendente";
       }
       this.entregasParciais.set(telefone, { ids, partes: resposta.respostas.slice(0, i + 1) });
-      this.salvarAgora();
+      void this.salvarAgora();
     }
     esquecerParcial();
     if (resposta.avisoAtendente) await this.avisar(resposta.avisoAtendente);

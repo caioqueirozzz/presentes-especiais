@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/shell/AppShell";
 import type { NavEntry, NavLink, ShellNotification } from "@/components/shell/AppShell";
 import { api, useApi } from "@/lib/client/api";
+import { homeFor } from "@/lib/types";
 import type { Me, Role } from "@/lib/types";
 
 interface PortalValue {
@@ -25,6 +26,12 @@ export function usePortal(): PortalValue {
 }
 
 function navFor(role: Role): NavEntry[] {
+  if (role === "DESIGNER") {
+    return [
+      { label: "Design", icon: "palette", href: "/app/design" },
+      { label: "Conta", icon: "person", href: "/app/conta" },
+    ];
+  }
   const base = role === "ADMIN" ? "/admin" : "/app";
   const gestao: NavLink[] = [
     { label: "Relatórios", icon: "analytics", href: `${base}/relatorios`, description: "Indicadores e desempenho comercial" },
@@ -42,6 +49,7 @@ function navFor(role: Role): NavEntry[] {
       items: [
         { label: "CRM", icon: "forum", href: `${base}/crm`, description: "Conversas e leads" },
         { label: "Quadros", icon: "view_kanban", href: `${base}/quadros`, description: "Quadros de tarefas da equipe" },
+        ...(role === "ADMIN" ? [{ label: "Design", icon: "palette", href: "/admin/design", description: "Jobs de arte e mockup" }] : []),
         { label: "PresentesIA", icon: "auto_awesome", href: `${base}/presentesia`, description: "Assistente de IA" },
       ],
     },
@@ -49,9 +57,12 @@ function navFor(role: Role): NavEntry[] {
   ];
 }
 
-export function Portal({ role, children }: { role: Role; children: ReactNode }) {
+export function Portal({ role: roles, children }: { role: Role | Role[]; children: ReactNode }) {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
+  const allowedKey = ([] as Role[]).concat(roles).join(",");
+  const allowed = allowedKey.split(",") as Role[];
+  const role: Role = me && allowed.includes(me.role) ? me.role : allowed[0];
   const notifications = useApi<{ notifications: ShellNotification[] }>(me ? "/api/notifications" : null, 30_000);
 
   useEffect(() => {
@@ -59,11 +70,11 @@ export function Portal({ role, children }: { role: Role; children: ReactNode }) 
       .then(({ user }) => {
         if (user.mustChangePassword) return router.replace("/trocar-senha");
         // Papel mudou desde o login: vai para o portal certo
-        if (user.role !== role) return router.replace(user.role === "ADMIN" ? "/admin/inicio" : "/app/inicio");
+        if (!allowed.includes(user.role)) return router.replace(homeFor(user.role));
         setMe(user);
       })
       .catch(() => {});
-  }, [role, router]);
+  }, [allowedKey, router]);
 
   async function signOut() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -74,7 +85,7 @@ export function Portal({ role, children }: { role: Role; children: ReactNode }) 
 
   return (
     <AppShell
-      homeHref={`${base}/inicio`}
+      homeHref={homeFor(role)}
       nav={navFor(role)}
       settingsHref={`${base}/conta`}
       userName={me?.name ?? null}
@@ -100,9 +111,9 @@ export function Portal({ role, children }: { role: Role; children: ReactNode }) 
               }`}
             >
               <span className="material-symbols-outlined text-[12px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                {me.role === "ADMIN" ? "shield" : "person"}
+                {me.role === "ADMIN" ? "shield" : me.role === "DESIGNER" ? "palette" : "person"}
               </span>
-              {me.role === "ADMIN" ? "ADMIN" : "COLABORADOR"}
+              {me.role}
             </span>
           </>
         )

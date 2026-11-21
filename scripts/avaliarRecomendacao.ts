@@ -19,7 +19,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { createBrindeMeClient } from "../src/integrations/brindeme/factory.js";
-import { FileProductIndexStore } from "../src/catalogo/indice.js";
+import { carregarIndiceDeScript } from "../src/catalogo/abrir.js";
 import { FileOccasionTagStore } from "../src/catalogo/ocasioes.js";
 import { recomendar, type PedidoRecomendacao, type Recomendacao } from "../src/catalogo/recomendar.js";
 import { verificarSugestao } from "../src/catalogo/verificacao.js";
@@ -45,6 +45,8 @@ interface PedidoJson {
 }
 
 const real = (n: number): string => `R$ ${n.toFixed(2).replace(".", ",")}`;
+/** Ajuste sem cotação exata do site sai sem valor. */
+const valor = (n?: number): string => (n === undefined ? "valor a confirmar" : real(n));
 
 function argumento(nome: string): string | undefined {
   const i = process.argv.indexOf(`--${nome}`);
@@ -52,13 +54,19 @@ function argumento(nome: string): string | undefined {
 }
 
 async function main() {
+  // --comparar é outra medição: BM25 × semântica, sem revalidação na API (spec §8).
+  // Importar já roda o script; ele cuida do próprio código de saída.
+  if (process.argv.includes("--comparar")) {
+    await import("./compararBusca.js");
+    return;
+  }
+
   const arquivo = resolve(argumento("arquivo") ?? join(__dir, "../evals/recomendacao/pedidos.json"));
   const pedidos: PedidoJson[] = JSON.parse(readFileSync(arquivo, "utf-8")).pedidos;
 
   const client = createBrindeMeClient({ reqPorMinuto: config.catalogo.reqPorMinuto });
-  const index = new FileProductIndexStore();
   const tags = new FileOccasionTagStore();
-  const indice = index.carregar();
+  const indice = await carregarIndiceDeScript();
 
   if (indice.produtos.length === 0) {
     console.error(`${RED}✗${RESET} índice de catálogo vazio. Rode antes: npm run sync:catalogo`);
@@ -84,7 +92,7 @@ async function main() {
       orcamentoTotal: p.orcamento_total,
       ocasiao: p.ocasiao,
     };
-    const r: Recomendacao = await recomendar(pedido, { index, tags, client });
+    const r: Recomendacao = await recomendar(pedido, { indice, tags, client });
 
     const parametros = [
       `consulta "${p.consulta}"`,
@@ -131,8 +139,8 @@ async function main() {
       semResposta++;
       const ajustes = r.ajustes.map((a) =>
         a.tipo === "aumentar_orcamento"
-          ? `subir o valor para ${real(a.preco_unitario_minimo)}/un (${a.nome}, ${a.quantidade} un = ${real(a.total_estimado)})`
-          : `${a.tipo === "aumentar_quantidade" ? "subir" : "reduzir"} para ${a.quantidade} un (${a.nome}, ${real(a.preco_unitario)}/un = ${real(a.total_estimado)})`
+          ? `subir o valor para ${valor(a.preco_unitario_minimo)}/un (${a.nome}, ${a.quantidade} un = ${valor(a.total_estimado)})`
+          : `${a.tipo === "aumentar_quantidade" ? "subir" : "reduzir"} para ${a.quantidade} un (${a.nome}, ${valor(a.preco_unitario)}/un = ${valor(a.total_estimado)})`
       );
       console.log(`${YELLOW}–${RESET} ${p.id} ${p.pedido}\n  ${GRAY}sem sugestão (${r.motivo})${ajustes.length ? ` · ajustes: ${ajustes.join("; ")}` : ""}${RESET}`);
       planilha.push(

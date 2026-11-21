@@ -14,7 +14,7 @@ import {
 } from "./saude.js";
 import { ehConversaDireta, normalizarTelefone } from "./telefone.js";
 
-const { Client, LocalAuth } = wwebjs;
+const { Client, LocalAuth, MessageMedia } = wwebjs;
 type ClienteWhatsApp = InstanceType<typeof Client>;
 // Os tipos de qrcode-terminal não têm export default; o require devolve o module.exports do CJS.
 const qrcode = createRequire(import.meta.url)("qrcode-terminal") as typeof import("qrcode-terminal");
@@ -116,7 +116,7 @@ export class CanalWwebjs implements CanalWhatsApp {
       this.cliente = null;
       if (antigo) {
         await comPrazo(antigo.logout(), 15_000).catch(() => {});
-        await comPrazo(antigo.destroy(), 10_000).catch(() => {});
+        await this.derrubar(antigo);
       }
       this.meuWid = this.meuTelefone = this.meuLid = "";
       this.meuNome = this.conectadoEm = null;
@@ -141,15 +141,39 @@ export class CanalWwebjs implements CanalWhatsApp {
     return enviada.id._serialized;
   }
 
+  /** Foto pedida pelo CRM (mockup do designer). Mesmo envio de imagem testado em 05/11, resolvendo o número como enviarTexto. */
+  async enviarImagemParaTelefone(telefone: string, url: string, legenda: string): Promise<string> {
+    const cliente = this.exigirCliente();
+    const numero = await cliente.getNumberId(telefone.replace(/\D/g, ""));
+    if (!numero) throw new Error("Este número não tem WhatsApp.");
+    const midia = await MessageMedia.fromUrl(url, { unsafeMime: true });
+    const enviada = await cliente.sendMessage(numero._serialized, midia, { caption: legenda, sendSeen: false });
+    if (!enviada) throw new Error("O WhatsApp não confirmou o envio.");
+    return enviada.id._serialized;
+  }
+
   async iniciar(): Promise<void> {
-    await this.lancar();
+    try {
+      await this.lancar();
+    } catch (err) {
+      // O vigia da abertura segue armado e relança em até 2 min: falhar na partida não pode matar a ponte.
+      this.opcoes.log({ type: "abertura_falhou", erro: String(err) });
+      console.warn(`WhatsApp não abriu (${String(err)}); nova tentativa em até ${ABERTURA_TIMEOUT_MS / 1000}s.`);
+    }
     this.instalarVigias();
   }
 
   async enviar(chatId: string, texto: string): Promise<void> {
-    // Sem sendSeen: false a biblioteca marca a conversa como lida a cada envio.
-    const enviada = await this.exigirCliente().sendMessage(chatId, texto, { sendSeen: false });
+    // Sem sendSeen: false a biblioteca marca a conversa como lida a cada envio; e-mail no texto virava prévia de site.
+    const enviada = await this.exigirCliente().sendMessage(chatId, texto, { sendSeen: false, linkPreview: false });
     // A biblioteca resolve vazio, sem lançar, quando não acha a conversa.
+    if (!enviada) throw new Error(`WhatsApp não encontrou a conversa ${chatId}`);
+  }
+
+  async enviarImagem(chatId: string, url: string, legenda: string): Promise<void> {
+    // Sonda de 05/11: assim o webp do CDN chega como foto, com a legenda inteira.
+    const midia = await MessageMedia.fromUrl(url, { unsafeMime: true });
+    const enviada = await this.exigirCliente().sendMessage(chatId, midia, { caption: legenda, sendSeen: false });
     if (!enviada) throw new Error(`WhatsApp não encontrou a conversa ${chatId}`);
   }
 
@@ -158,7 +182,7 @@ export class CanalWwebjs implements CanalWhatsApp {
     this.encerrando = true;
     const cliente = this.cliente;
     this.cliente = null;
-    if (cliente) await comPrazo(cliente.destroy(), 10_000).catch(() => {});
+    if (cliente) await this.derrubar(cliente);
   }
 
   async digitando(chatId: string, duracaoMs = DIGITANDO_MAX_MS): Promise<void> {
@@ -194,7 +218,13 @@ export class CanalWwebjs implements CanalWhatsApp {
       const chatId = chat.id._serialized;
       if (chat.isGroup || chat.unreadCount <= 0 || !ehConversaDireta(chatId)) continue;
       const recentes = await chat.fetchMessages({ limit: chat.unreadCount, fromMe: false });
-      const mensagens = await Promise.all(naoLidasDoCliente(recentes, chat.unreadCount).map((m) => this.converter(m)));
+      // Uma mensagem que não converte não pode derrubar a varredura das outras.
+      const convertidas = await Promise.allSettled(naoLidasDoCliente(recentes, chat.unreadCount).map((m) => this.converter(m)));
+      const mensagens: MensagemRecebida[] = [];
+      for (const c of convertidas) {
+        if (c.status === "fulfilled") mensagens.push(c.value);
+        else this.opcoes.log({ type: "mensagem_nao_convertida", erro: String(c.reason) });
+      }
       if (mensagens.length > 0) resultado.push({ chatId, mensagens });
     }
     return resultado;
@@ -209,6 +239,8 @@ export class CanalWwebjs implements CanalWhatsApp {
     const versao = this.versoes[this.indiceVersao];
     const cliente = new Client({
       authStrategy: new LocalAuth({ dataPath: this.opcoes.sessaoDir, clientId: "presentes-especiais" }),
+      // O padrão (30 s) estoura antes do vigia com o PC lento: o vigia decide quando relançar.
+      authTimeoutMs: ABERTURA_TIMEOUT_MS,
       puppeteer: {
         headless: true,
         ...(this.opcoes.chromePath ? { executablePath: this.opcoes.chromePath } : {}),
@@ -282,16 +314,28 @@ export class CanalWwebjs implements CanalWhatsApp {
     });
     cliente.on("disconnected", (motivo) => void this.aoDesconectar(cliente, String(motivo)));
 
-    await cliente.initialize();
+    try {
+      await cliente.initialize();
+    } catch (err) {
+      // A reconexão derrubou o Chrome desta abertura no meio ("Navigating frame was detached"): a falha é do cliente velho.
+      if (this.cliente !== cliente) {
+        this.opcoes.log({ type: "abertura_substituida", erro: String(err) });
+        return;
+      }
+      throw err;
+    }
   }
 
   private async converter(msg: Message): Promise<MensagemRecebida> {
+    // Sem id o lote vira 400 na API (#30: o WhatsApp Web trocou _serialized por $1).
+    const id = msg.id?._serialized;
+    if (!id) throw new Error(`mensagem sem id (tipo ${msg.type})`);
     const chatId = msg.fromMe ? msg.to : msg.from;
     const direta = ehConversaDireta(chatId, msg.author);
     const telefone = direta ? await this.resolverTelefone(chatId) : null;
     const tipo = tipoDaMensagem(msg.type);
     const recebida: MensagemRecebida = {
-      id: msg.id._serialized ?? `${msg.id.fromMe}_${(msg.id as unknown as Record<string, unknown>).remote}_${(msg.id as unknown as Record<string, unknown>).id}`,
+      id,
       chatId,
       telefone,
       deMim: msg.fromMe,
@@ -310,7 +354,7 @@ export class CanalWwebjs implements CanalWhatsApp {
     if (!msg.fromMe && typeof dados?.notifyName === "string" && dados.notifyName.trim()) {
       recebida.nomeContato = dados.notifyName.trim();
     }
-    if (tipo === "midia") {
+    if (tipo === "midia" || tipo === "audio") {
       recebida.baixarMidia = async () => {
         const midia = await msg.downloadMedia();
         if (!midia) return null;
@@ -390,14 +434,36 @@ export class CanalWwebjs implements CanalWhatsApp {
     try {
       const antigo = this.cliente;
       this.cliente = null;
-      // destroy(), nunca logout(): logout apaga a sessão e obriga a escanear o QR de novo.
-      if (antigo) await antigo.destroy().catch(() => {});
+      try {
+        // destroy(), nunca logout(): logout apaga a sessão e obriga a escanear o QR de novo.
+        if (antigo) await this.derrubar(antigo);
+      } finally {
+        this.reconectando = false;
+      }
+      // Fora da trava: se esta abertura também pendurar, o vigia dela precisa poder relançar.
       await this.lancar();
     } catch (err) {
       this.opcoes.log({ type: "reconexao_falhou", erro: String(err) });
-    } finally {
-      this.reconectando = false;
+      console.error(`🚨 Reconexão do WhatsApp falhou (${String(err)}). A ponte está parada até reconectar; se repetir, reinicie o processo.`);
     }
+  }
+
+  /** O destroy() da biblioteca só fecha o Chrome com o CDP de pé; caído, o Chrome segue vivo segurando o perfil (#29). */
+  private async derrubar(cliente: ClienteWhatsApp): Promise<void> {
+    const processo = cliente.pupBrowser?.process();
+    await comPrazo(cliente.destroy(), 10_000).catch((err) =>
+      this.opcoes.log({ type: "destroy_falhou", erro: String(err) })
+    );
+    if (!processo || processo.exitCode !== null || processo.signalCode !== null) return;
+    const saiu = new Promise<void>((resolve) => processo.once("exit", () => resolve()));
+    try {
+      // No Windows o kill lança EACCES se o Chrome estiver no meio da saída; sem o try a rejeição derrubava a ponte.
+      processo.kill("SIGKILL");
+    } catch (err) {
+      this.opcoes.log({ type: "chrome_nao_morreu", erro: String(err) });
+      return;
+    }
+    await comPrazo(saiu, 5_000).catch(() => this.opcoes.log({ type: "chrome_nao_morreu", pid: processo.pid }));
   }
 
   private async trocarVersao(cliente: ClienteWhatsApp): Promise<void> {
@@ -414,7 +480,7 @@ export class CanalWwebjs implements CanalWhatsApp {
       this.estado = "DESVINCULADO";
       this.ultimoErro = `Desconectado pelo celular (${motivo}). Gere um novo QR no CRM.`;
       if (this.cliente === cliente) this.cliente = null;
-      await comPrazo(cliente.destroy(), 10_000).catch(() => {});
+      await this.derrubar(cliente);
       console.error(`🚨 WhatsApp desconectado de vez (${motivo}). Suba de novo e escaneie o QR.`);
       return;
     }

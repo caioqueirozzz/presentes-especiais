@@ -40,6 +40,10 @@ export class ConjuntoLimitado {
     }
   }
 
+  delete(id: string): void {
+    this.itens.delete(id);
+  }
+
   /** Do mais antigo ao mais recente. */
   valores(): string[] {
     return [...this.itens];

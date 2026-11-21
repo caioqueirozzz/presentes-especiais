@@ -22,7 +22,7 @@ describe("H4 — transferência humana", () => {
     expect(r.modo).toBe("humano");
     expect(r.avisoAtendente).toMatch(/Transferência/);
     expect(r.avisoAtendente).toMatch(/Motivo: pedido_cliente/);
-    expect(r.avisoAtendente).toMatch(/Produtos: prod-001/);
+    expect(r.avisoAtendente).toMatch(/Produtos: Caneca de Porcelana Personalizada/);
     expect(r.avisoAtendente).toMatch(/quero falar com uma pessoa/);
     expect(r.avisoAtendente).toContain(`#devolver ${TEL}`);
 
@@ -84,7 +84,7 @@ describe("H4 — transferência humana", () => {
     expect(r.modo).toBe("humano");
     expect(r.avisoAtendente).toMatch(/o modelo falhou duas vezes/);
     // A mensagem do cliente não se perde.
-    expect(b.repo.carregar(TEL).estado.historico.filter((m) => m.content === "oi")).toHaveLength(1);
+    expect((await b.repo.carregar(TEL)).estado.historico.filter((m) => m.content === "oi")).toHaveLength(1);
   });
 
   it("H4.6 turno que passa do teto de tempo → pessoa assume", async () => {

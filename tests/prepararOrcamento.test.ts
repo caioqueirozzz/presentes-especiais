@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { Cotacao } from "../src/catalogo/cotacao.js";
+import { setSobDemanda } from "../src/catalogo/sobDemanda.js";
 import { MockBrindeMeClient } from "../src/integrations/brindeme/mockClient.js";
-import { prepararOrcamentoHandler } from "../src/tools/prepararOrcamento.js";
+import { AVISO_ESTIMATIVA, prepararOrcamentoHandler } from "../src/tools/prepararOrcamento.js";
 import { transferirHumanoHandler } from "../src/tools/transferirHumano.js";
 import { addMessage, createInitialState } from "../src/agent/state.js";
 import { semearMapaSubprodutos } from "./helpers/mapaSubprodutos.js";
@@ -37,6 +39,16 @@ describe("prepararOrcamento", () => {
     });
   });
 
+  it("cor em texto vence o subproduto_id copiado errado (teste de 19/11: pediu preto, veio o id do verde)", async () => {
+    const r = await prepararOrcamentoHandler({ ...validInput, itens: [{ subproduto_id: "sub-001-branco", cor: "preto", quantidade: 50 }] }, state, client);
+    expect(r).toMatchObject({ status: "estimativa_pronta", resumo: { itens: [{ subproduto_id: "sub-001-preto", cor: "Preto" }] } });
+  });
+
+  it("cor que o produto não tem: erro com as cores disponíveis, sem orçamento", async () => {
+    const r = await prepararOrcamentoHandler({ ...validInput, itens: [{ subproduto_id: "sub-001-branco", cor: "Roxo", quantidade: 50 }] }, state, client);
+    expect(r).toMatchObject({ erro: "cor_nao_encontrada", cores_disponiveis: ["Branco", "Preto"] });
+  });
+
   it("retorna a estimativa com o aviso de que a equipe confirma personalização, frete e prazo", async () => {
     const result = await prepararOrcamentoHandler(validInput, state, client) as {
       status: string;
@@ -51,6 +63,22 @@ describe("prepararOrcamento", () => {
     // 50 * 18.90 em float dá 944.9999999999999; o total é arredondado em
     // centavos justamente para esse número não chegar ao cliente.
     expect(result.resumo.total_estimado).toBe(945);
+  });
+
+  it("[#26] traz o resumo pronto para o cliente: produto, cor, valores e o aviso literal", async () => {
+    const result = (await prepararOrcamentoHandler(validInput, state, client)) as {
+      resumo_para_cliente: string;
+      instrucao: string;
+    };
+    // toLocaleString separa "R$" do valor com espaço inquebrável.
+    expect(result.resumo_para_cliente.replace(/ /g, " ")).toBe(
+      [
+        "• 50× Caneca de Porcelana Personalizada (Branco) — R$ 18,90 cada = R$ 945,00",
+        "Total estimado: R$ 945,00",
+        `_${AVISO_ESTIMATIVA}_`,
+      ].join("\n")
+    );
+    expect(result.instrucao).toMatch(/resumo_para_cliente/);
   });
 
   it("telefone do orçamento é o da conversa, não o que o modelo mandar (#12)", async () => {
@@ -76,6 +104,18 @@ describe("prepararOrcamento", () => {
     expect(state.fichaPedido?.resumo).toMatchObject({ prazo_desejado: "até 10/12", personalizacao: "tem arte, 2 cores" });
   });
 
+  it("id do produto e só uma cor cobre a quantidade: usa essa cor, sem perguntar (loop do dogfooding de 09/11)", async () => {
+    const limpo = createInitialState("5583999990000");
+    limpo.produtosDiscutidos.push("prod-001");
+    const r = await prepararOrcamentoHandler(
+      { ...validInput, itens: [{ subproduto_id: "prod-001", quantidade: 250 }] },
+      limpo,
+      client
+    );
+    expect(r).toMatchObject({ status: "estimativa_pronta" });
+    expect(JSON.stringify(r)).toContain("Branco");
+  });
+
   it("id do produto no lugar do subproduto: devolve as cores com o id certo (eval 05)", async () => {
     const limpo = createInitialState("5583999990000");
     limpo.produtosDiscutidos.push("prod-001");
@@ -87,6 +127,11 @@ describe("prepararOrcamento", () => {
     expect(r.erro).toBe("informe_a_cor");
     expect(r.opcoes).toContainEqual(expect.objectContaining({ subproduto_id: "sub-001-branco" }));
     expect(r.instrucao).toMatch(/preparar_orcamento de novo/);
+    // Resultado de ferramenta some no turno seguinte: sem isto, o "Aceito" do cliente voltava ao id do produto (#28).
+    expect(limpo.produtosDetalhados?.[0]).toMatchObject({
+      id: "prod-001",
+      cores: expect.arrayContaining([expect.objectContaining({ subproduto_id: "sub-001-branco" })]),
+    });
     const segunda = await prepararOrcamentoHandler(
       { ...validInput, itens: [{ subproduto_id: "sub-001-branco", quantidade: 50 }] },
       limpo,
@@ -207,6 +252,13 @@ describe("transferir_humano com orcamento_para_emitir (R5: o agente estima, pess
     expect(JSON.stringify(r)).not.toMatch(/pergunte se pode enviar/);
   });
 
+  it("id da cor corrigido pela cor em texto: o 'pode enviar' com o mesmo id errado ainda é a mesma ficha", async () => {
+    const corrigido = { ...validInput, itens: [{ subproduto_id: "sub-001-branco", cor: "Preto", quantidade: 50 }] };
+    await prepararOrcamentoHandler(corrigido, state, client);
+    addMessage(state, "user", "pode enviar");
+    expect(await prepararOrcamentoHandler(corrigido, state, client)).toMatchObject({ status: "ficha_ja_apresentada" });
+  });
+
   it("a ficha que vai à equipe é a que o cliente viu, não a reescrita pelo modelo (prazo 20/11 virou 2023-11-20)", async () => {
     await prepararOrcamentoHandler({ ...validInput, prazo_desejado: "20/11" }, state, client);
     addMessage(state, "user", "pode enviar");
@@ -224,5 +276,71 @@ describe("transferir_humano com orcamento_para_emitir (R5: o agente estima, pess
   it("outro motivo não exige ficha", async () => {
     const r = await transferirHumanoHandler({ motivo: "desconto", prioridade: "normal" }, state, client);
     expect(r.status).toBe("transferido");
+  });
+});
+
+describe("preparar_orcamento com o preço exato do site", () => {
+  const entrada = (quantidade = 50) => ({ tipo: "PF" as const, nome: "João Silva", email: "joao@teste.com", itens: [{ subproduto_id: "sub-001-branco", quantidade }] });
+  const comMapa = () => {
+    const state = createInitialState("5583999990000");
+    state.subprodutoParaProduto["sub-001-branco"] = "prod-001";
+    return state;
+  };
+  afterEach(() => setSobDemanda(null));
+
+  it("reaproveita a cotação válida da conversa sem chamar o site de novo", async () => {
+    const client = new MockBrindeMeClient();
+    const espiao = vi.spyOn(client, "precoVenda");
+    const state = comMapa();
+    state.cotacoes = { "sub-001-branco:50": { subproduto_id: "sub-001-branco", quantidade: 50, centavos: 2000, fonte: "site", em: new Date().toISOString() } };
+    const r = (await prepararOrcamentoHandler(entrada(), state, client)) as { resumo: { itens: Array<{ preco_unitario: number; subtotal: number }> } };
+    expect(espiao).not.toHaveBeenCalled();
+    expect(r.resumo.itens[0]).toMatchObject({ preco_unitario: 20, subtotal: 1000 });
+  });
+
+  it("cota de novo com mais de 1 h, com outra quantidade ou com fonte que não é site", async () => {
+    const client = new MockBrindeMeClient();
+    const espiao = vi.spyOn(client, "precoVenda");
+    const velha = new Date(Date.now() - 2 * 3_600_000).toISOString();
+    const casos: Array<Record<string, Cotacao>> = [
+      { "sub-001-branco:50": { subproduto_id: "sub-001-branco", quantidade: 50, centavos: 1, fonte: "site" as const, em: velha } },
+      { "sub-001-branco:60": { subproduto_id: "sub-001-branco", quantidade: 60, centavos: 1, fonte: "site" as const, em: new Date().toISOString() } },
+      { "sub-001-branco:50": { subproduto_id: "sub-001-branco", quantidade: 50, centavos: 1, fonte: "indice" as "site", em: new Date().toISOString() } },
+    ];
+    for (const cotacoes of casos) {
+      const state = comMapa();
+      state.cotacoes = cotacoes;
+      const r = (await prepararOrcamentoHandler(entrada(), state, client)) as { resumo: { itens: Array<{ preco_unitario: number }> } };
+      expect(r.resumo.itens[0].preco_unitario).toBe(18.9);
+    }
+    expect(espiao).toHaveBeenCalledTimes(3);
+  });
+
+  it("sem preço (rota fora ou 'a consultar'): preco_indisponivel com a instrução de transferir", async () => {
+    const fora = new MockBrindeMeClient();
+    fora.falharPrecoVenda = true;
+    const r1 = await prepararOrcamentoHandler(entrada(), comMapa(), fora);
+    expect(r1).toMatchObject({ erro: "preco_indisponivel", instrucao: "transferir", motivo_sugerido: "outro" });
+
+    const semLimite = new (class extends MockBrindeMeClient {
+      async getProduct(id: string) {
+        const p = await super.getProduct(id);
+        return { ...p, subproducts: p.subproducts.map((s) => ({ ...s, stock: 100_000 })) };
+      }
+    })();
+    const r2 = await prepararOrcamentoHandler(entrada(10_000), comMapa(), semLimite);
+    expect(r2).toMatchObject({ erro: "preco_indisponivel" });
+  });
+
+  it("sob demanda passa sem estoque; sem estoque em nenhuma cor oferece o humano", async () => {
+    const client = new MockBrindeMeClient();
+    const state = createInitialState("5583999990000");
+    state.subprodutoParaProduto["sub-006-cristal"] = "prod-006";
+    const item = { tipo: "PF" as const, nome: "João Silva", email: "joao@teste.com", itens: [{ subproduto_id: "sub-006-cristal", quantidade: 1500 }] };
+    const sem = (await prepararOrcamentoHandler(item, state, client)) as { erro: string; instrucao: string };
+    expect(sem.erro).toBe("estoque_insuficiente");
+    expect(sem.instrucao).toMatch(/não tem no estoque/);
+    setSobDemanda(["prod-006"]);
+    expect(await prepararOrcamentoHandler(item, state, client)).toMatchObject({ status: "estimativa_pronta" });
   });
 });

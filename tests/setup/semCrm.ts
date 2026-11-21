@@ -1,4 +1,5 @@
 import { setBuscarHistoricoCliente } from "../../src/integrations/crm/historicoCliente.js";
+import { setEncaminharParaDesign } from "../../src/integrations/crm/design.js";
 
 /*
  * O .env de desenvolvimento tem CRM_URL: sem isto, todo runTurn dos testes consultaria o CRM local
@@ -6,5 +7,8 @@ import { setBuscarHistoricoCliente } from "../../src/integrations/crm/historicoC
  * o teste que precisa do histórico injeta o seu com setBuscarHistoricoCliente.
  */
 setBuscarHistoricoCliente(async () => {
+  throw new Error("CRM desligado nos testes");
+});
+setEncaminharParaDesign(async () => {
   throw new Error("CRM desligado nos testes");
 });

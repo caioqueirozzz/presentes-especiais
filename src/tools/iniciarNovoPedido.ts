@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ConversationState } from "../agent/state.js";
 import type { BrindeMeClient } from "../integrations/brindeme/client.js";
+import { arquivosDaUltimaMensagem } from "./registrarArte.js";
 
 export const iniciarNovoPedidoSchema = z.object({
   o_que_procura: z
@@ -59,7 +60,9 @@ export async function iniciarNovoPedidoHandler(input: IniciarNovoPedidoInput, st
   state.produtosDetalhados = undefined;
   state.fichaPedido = undefined;
   state.orcamentoEnviado = undefined;
-  state.artes = [];
+  // A arte que o cliente mandou nesta mensagem é do pedido novo: registrar_arte pode ter vindo antes, no mesmo turno
+  const doTurno = new Set(arquivosDaUltimaMensagem(state).flatMap((f) => [f.caminho, f.nome]));
+  state.artes = state.artes.filter((a) => doTurno.has(a.arquivo));
   state.ciclo = (state.ciclo ?? 0) + 1;
   state.novoPedidoIniciadoEm = agora;
 

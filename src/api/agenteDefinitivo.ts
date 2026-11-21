@@ -1,6 +1,7 @@
 import { ConversaDesconhecidaError, TurnoEmAndamentoError, type Agente } from "../contrato/agente.js";
 import { lerEstadoSistema, type EstadoSistema } from "../controle/estadoSistema.js";
 import { config } from "../config.js";
+import { logarErroBanco } from "../db/banco.js";
 import type {
   Evento,
   MensagemLote,
@@ -8,6 +9,7 @@ import type {
   RespostaEvento,
   RespostaMensagens,
 } from "../contrato/esquemas.js";
+import { itensDosCartoes, respostasDoTurno } from "../tools/cartao.js";
 import { formatarParaWhatsApp, loteParaTexto } from "../contrato/texto.js";
 import { addMessage, limparNomeWhatsapp, type ConversationState } from "../agent/state.js";
 import { runTurn, type TurnResult } from "../agent/runTurn.js";
@@ -40,7 +42,7 @@ export interface DepsAgente {
   memoriaMs?: number;
   /** Para os evals: recebe o resultado bruto de cada turno. */
   aoTurno?: (resultado: TurnResult) => void;
-  /** Override para testes: evita ler data/estado-sistema.json do projeto. */
+  /** Override para testes: evita ler o estado do banco. */
   lerEstado?: () => EstadoSistema;
 }
 
@@ -52,7 +54,7 @@ export class AgenteDefinitivo implements Agente {
   constructor(private readonly deps: DepsAgente) {}
 
   async processarLote(pedido: PedidoMensagens): Promise<RespostaMensagens> {
-    const conversa = this.conversa(pedido.telefone);
+    const conversa = await this.conversa(pedido.telefone);
     const guardado = conversa.turnos.find((t) => t.turnoId === pedido.turnoId);
     if (guardado) return vigente(conversa, guardado);
     if (this.emAndamento.has(pedido.telefone)) throw new TurnoEmAndamentoError();
@@ -71,10 +73,10 @@ export class AgenteDefinitivo implements Agente {
   }
 
   async processarEvento(evento: Evento): Promise<RespostaEvento> {
-    if (evento.tipo === "devolver" && !this.conversas.has(evento.telefone) && !this.deps.repo.existe(evento.telefone)) {
+    if (evento.tipo === "devolver" && !this.conversas.has(evento.telefone) && !(await this.deps.repo.existe(evento.telefone))) {
       throw new ConversaDesconhecidaError();
     }
-    const conversa = this.conversa(evento.telefone);
+    const conversa = await this.conversa(evento.telefone);
     const { estado } = conversa;
     if (evento.tipo === "mensagem_atendente") {
       if (!conversa.idsVistos.includes(evento.id)) {
@@ -100,11 +102,11 @@ export class AgenteDefinitivo implements Agente {
           : "[Atendente devolveu o atendimento à IA]"
       );
     }
-    this.deps.repo.salvar(conversa);
+    await this.deps.repo.salvar(conversa);
     return { modo: estado.modo };
   }
 
-  private conversa(telefone: string): Conversa {
+  private async conversa(telefone: string): Promise<Conversa> {
     const agora = Date.now();
     const memoriaMs = this.deps.memoriaMs ?? MEMORIA_PADRAO_MS;
     for (const [tel, item] of this.conversas) {
@@ -112,9 +114,14 @@ export class AgenteDefinitivo implements Agente {
     }
     let item = this.conversas.get(telefone);
     if (!item) {
-      item = { conversa: this.deps.repo.carregar(telefone), usadaEm: agora };
-      item.conversa.estado.canal = "whatsapp";
-      this.conversas.set(telefone, item);
+      const carregada = await this.deps.repo.carregar(telefone);
+      // Outra chamada pode ter carregado a mesma conversa durante o await: fica o objeto que já está no cache.
+      item = this.conversas.get(telefone);
+      if (!item) {
+        item = { conversa: carregada, usadaEm: agora };
+        item.conversa.estado.canal = "whatsapp";
+        this.conversas.set(telefone, item);
+      }
     }
     item.usadaEm = agora;
     return item.conversa;
@@ -141,17 +148,17 @@ export class AgenteDefinitivo implements Agente {
 
     if (conversa.transferenciaPendente) {
       addMessage(estado, "user", texto);
-      return concluir(respostaDeTransferencia(conversa, pedido.telefone, conversa.transferenciaPendente));
+      return await concluir(respostaDeTransferencia(conversa, pedido.telefone, conversa.transferenciaPendente));
     }
 
     if (estado.modo === "humano") {
       addMessage(estado, "user", texto);
-      return concluir({ respostas: [], modo: "humano" });
+      return await concluir({ respostas: [], modo: "humano" });
     }
 
     if (this.excedeuLimite(conversa)) {
       addMessage(estado, "user", texto);
-      return concluir(transferirPeloSistema(estado, pedido.telefone, MSG_LIMITE, "outro", "limite de respostas por hora", logger));
+      return await concluir(transferirPeloSistema(estado, pedido.telefone, MSG_LIMITE, "outro", "limite de respostas por hora", logger));
     }
 
     const posicaoDaMensagem = estado.historico.length;
@@ -164,7 +171,9 @@ export class AgenteDefinitivo implements Agente {
     try {
       const r = await runTurn(texto, estado, this.deps.llm, this.deps.client, logger, {
         signal: controle.signal,
-        aoEfeito: () => this.deps.repo.salvar(conversa),
+        aoEfeito: () => {
+          this.deps.repo.salvar(conversa).catch((err) => logger.log({ type: "alerta", gravidade: "alta", motivo: "conversa_nao_salva", ...logarErroBanco(err) }));
+        },
         aoTransferir: (resumo, lacunas) => {
           conversa.transferenciaPendente = { resumo, lacunas };
         },
@@ -174,9 +183,10 @@ export class AgenteDefinitivo implements Agente {
       const transferencia = conversa.transferenciaPendente as TransferenciaPendente | undefined;
       if (transferencia) {
         this.deps.aoTurno?.(r);
-        if (!r.response) return concluir(respostaDeTransferencia(conversa, pedido.telefone, transferencia));
-        return concluir({
-          respostas: formatarParaWhatsApp(r.response),
+        if (!r.response) return await concluir(respostaDeTransferencia(conversa, pedido.telefone, transferencia));
+        return await concluir({
+          // Na transferência o aviso de "vou te conectar" fecha a conversa: os cartões vão antes dele.
+          respostas: [...itensDosCartoes(r.cartoes ?? []), ...formatarParaWhatsApp(r.response)],
           modo: estado.modo,
           avisoAtendente: formatarAvisoTransferencia(pedido.telefone, transferencia.resumo, transferencia.lacunas),
         });
@@ -184,11 +194,11 @@ export class AgenteDefinitivo implements Agente {
       if (!r.response) throw new Error("resposta vazia do modelo");
       this.deps.aoTurno?.(r);
       conversa.respostasRecentes.push(new Date().toISOString());
-      return concluir({ respostas: formatarParaWhatsApp(r.response), modo: estado.modo });
+      return await concluir({ respostas: respostasDoTurno(r.cartoes ?? [], r.response), modo: estado.modo });
     } catch (err) {
       if (controle.signal.reason instanceof AtendenteAssumiu) {
         logger.log({ type: "state_change", change: "turno_interrompido_pelo_atendente" });
-        return concluir(respostaDaTomada(conversa, pedido.telefone));
+        return await concluir(respostaDaTomada(conversa, pedido.telefone));
       }
       const transferencia = conversa.transferenciaPendente;
       const estourou = controle.signal.reason instanceof TetoDoTurno;
@@ -198,17 +208,17 @@ export class AgenteDefinitivo implements Agente {
         motivo: estourou ? "teto_do_turno" : `falha_no_turno: ${String(err).slice(0, 200)}`,
         ...(transferencia ? { depois_da_transferencia: true } : {}),
       });
-      if (transferencia) return concluir(respostaDeTransferencia(conversa, pedido.telefone, transferencia));
+      if (transferencia) return await concluir(respostaDeTransferencia(conversa, pedido.telefone, transferencia));
 
       const falhas = (conversa.falhasPorTurno[pedido.turnoId] ?? 0) + 1;
       conversa.falhasPorTurno[pedido.turnoId] = falhas;
       if (estourou || falhas >= FALHAS_DO_LOTE_PARA_TRANSFERIR) {
         garantirMensagem(estado, posicaoDaMensagem, texto);
         const observacao = estourou ? "turno passou do teto de tempo" : "o modelo falhou duas vezes neste lote";
-        return concluir(transferirPeloSistema(estado, pedido.telefone, MSG_FALHA, "falha_sistema", observacao, logger));
+        return await concluir(transferirPeloSistema(estado, pedido.telefone, MSG_FALHA, "falha_sistema", observacao, logger));
       }
       desfazerMensagem(estado, posicaoDaMensagem, texto);
-      this.deps.repo.salvar(conversa);
+      await this.deps.repo.salvar(conversa);
       throw err;
     } finally {
       clearTimeout(teto);
@@ -220,7 +230,7 @@ export class AgenteDefinitivo implements Agente {
    * e ninguém era avisado, embora o texto prometa que a equipe responde. Agora a mensagem fica no
    * histórico, o cliente recebe o aviso uma vez por suspensão e o atendente é chamado nessa mesma vez.
    */
-  private responderSuspenso(conversa: Conversa, pedido: PedidoMensagens, sistema: EstadoSistema): RespostaMensagens {
+  private async responderSuspenso(conversa: Conversa, pedido: PedidoMensagens, sistema: EstadoSistema): Promise<RespostaMensagens> {
     const { estado } = conversa;
     const novas = pedido.mensagens.filter((m) => !conversa.idsVistos.includes(m.id));
     if (novas.length === 0) return { respostas: [], modo: estado.modo };
@@ -230,10 +240,10 @@ export class AgenteDefinitivo implements Agente {
     new Logger(estado.conversaId, { turnoId: pedido.turnoId }).log({ type: "state_change", change: "mensagem_com_agente_suspenso" });
 
     const marca = sistema.suspensoEm ?? "suspenso";
-    if (conversa.avisoSuspensao === marca) return this.concluir(conversa, pedido, novas, { respostas: [], modo: "ia" });
+    if (conversa.avisoSuspensao === marca) return await this.concluir(conversa, pedido, novas, { respostas: [], modo: "ia" });
     conversa.avisoSuspensao = marca;
     addMessage(estado, "assistant", MSG_SUSPENSAO);
-    return this.concluir(conversa, pedido, novas, {
+    return await this.concluir(conversa, pedido, novas, {
       respostas: [MSG_SUSPENSAO],
       modo: "ia",
       avisoAtendente: [
@@ -250,12 +260,12 @@ export class AgenteDefinitivo implements Agente {
     return conversa.respostasRecentes.length >= this.deps.respostasPorHora;
   }
 
-  private concluir(
+  private async concluir(
     conversa: Conversa,
     pedido: PedidoMensagens,
     novas: MensagemLote[],
     resposta: RespostaMensagens
-  ): RespostaMensagens {
+  ): Promise<RespostaMensagens> {
     conversa.idsVistos.push(...novas.map((m) => m.id));
     conversa.turnos.push({
       turnoId: pedido.turnoId,
@@ -265,7 +275,12 @@ export class AgenteDefinitivo implements Agente {
     });
     delete conversa.falhasPorTurno[pedido.turnoId];
     delete conversa.transferenciaPendente;
-    this.deps.repo.salvar(conversa);
+    // Banco fora não pode virar falha do LLM: a resposta já existe e segue para o cliente.
+    await this.deps.repo
+      .salvar(conversa)
+      .catch((err) =>
+        new Logger(conversa.estado.conversaId, { turnoId: pedido.turnoId }).log({ type: "alerta", gravidade: "alta", motivo: "conversa_nao_salva", ...logarErroBanco(err) })
+      );
     return resposta;
   }
 }
@@ -342,7 +357,7 @@ function registrarArquivos(estado: ConversationState, novas: MensagemLote[]): vo
   const lista = (estado.arquivosRecebidos ??= []);
   for (const m of novas) {
     if (m.arquivo && !lista.some((a) => a.caminho === m.arquivo!.caminho)) {
-      lista.push({ nome: m.arquivo.nome, caminho: m.arquivo.caminho, mime: m.arquivo.mime, bytes: m.arquivo.bytes });
+      lista.push({ nome: m.arquivo.nome, caminho: m.arquivo.caminho, mime: m.arquivo.mime, bytes: m.arquivo.bytes, recebidoEm: m.timestamp });
     }
   }
 }
