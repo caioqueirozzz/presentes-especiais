@@ -9,12 +9,12 @@
 **Tech Stack:** TypeScript, vitest (agente com `--poolOptions.forks.singleFork`; CRM com pglite), Next.js 15 (CRM), SDK `openai` 7.23.
 
 **Spec:** não há spec nova. As fontes são:
-- `C:\Users\joao_\dev\DC Tech\Presentes Especiais\Validações\revisao-final-banco-neon-2026-11-19.md` (revisão: I1, I2, I3, M3, M4);
-- `C:\Users\joao_\security-audit-skill\agente-brindeme\run-2\findings.json` (TOCTOU confirmado; Whisper sem cota em needs_validation) e `REPORT.md` (pistas de injeção adiadas, conferidas à mão em 19/11).
+- o relatório da revisão final de 19/11 (fora do repositório) (revisão: I1, I2, I3, M3, M4);
+- o `findings.json` do security audit run-2 (fora do repositório) (TOCTOU confirmado; Whisper sem cota em needs_validation) e `REPORT.md` (pistas de injeção adiadas, conferidas à mão em 19/11).
 
 ## Global Constraints
 
-- Worktree `C:\Users\joao_\dev\DC Tech\Presentes Especiais\repo-busca-semantica`, branch `banco-neon`, base `428d14a`. Nada de push, PR ou branch nova.
+- Worktree local, branch `banco-neon`, base `428d14a`. Nada de push, PR ou branch nova.
 - Um commit por tarefa, `fix(<área>): …`, terminando com a linha `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - Testes do agente: `npx vitest run --poolOptions.forks.singleFork <arquivo>` na raiz. Testes do CRM: `cd crm && npx vitest run <arquivo>`.
 - Não rodar evals, nada contra OpenAI, Neon ou WhatsApp real.

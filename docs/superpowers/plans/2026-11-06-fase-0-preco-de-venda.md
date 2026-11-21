@@ -14,7 +14,7 @@
 
 ## Para quem chega sem contexto
 
-- **Repo:** `C:\Users\joao_\dev\DC Tech\Presentes Especiais\repo-agente-brindeme` (GitHub `caioqueirozzz/presentes-especiais`, **repo público**).
+- **Repo:** raiz deste repositório (GitHub `caioqueirozzz/presentes-especiais`, **repo público**).
 - **Branch de partida:** `preco-de-venda-do-site`, sobre `restaura-correcoes-do-dogfooding`. Trabalhe nela; não crie outra.
 - **Idioma:** código, nomes, comentários, mensagens e commits em português, no estilo do código vizinho.
 - **Shell:** Windows. Os comandos abaixo valem no Git Bash. Testes sempre com `--maxWorkers=1 --minWorkers=1` (PC com 7,8 GB de RAM; o vitest 2.1.9 exige os dois juntos).
@@ -84,7 +84,7 @@ Cinco situações que a spec implica e que os testes das tarefas não cobririam 
 - [ ] **Passo 1: conferir o ponto de partida**
 
 ```bash
-cd "/c/Users/joao_/dev/DC Tech/Presentes Especiais/repo-agente-brindeme"
+cd <raiz do repositório>
 git branch --show-current   # esperado: preco-de-venda-do-site
 git status --short          # esperado: só " M .gitignore" (a linha .superpowers); não mexa nele
 npm ci

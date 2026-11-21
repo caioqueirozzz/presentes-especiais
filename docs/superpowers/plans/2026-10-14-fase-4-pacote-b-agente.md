@@ -19,7 +19,7 @@ cada conversa vive em `data/conversas/<telefone>.json` (`src/conversas/`). O `ru
 
 ## Para quem chega sem contexto
 
-- **Repo:** `C:\Users\joao_\dev\DC Tech\Presentes Especiais\repo-agente-brindeme` (GitHub `caioqueirozzz/agente-brindeme`).
+- **Repo:** raiz deste repositório (GitHub `caioqueirozzz/agente-brindeme`).
 - **Branch:** `fase-4-integracao-whatsapp`, com o Pacote A já commitado. Não troque de branch e não faça rebase.
 - **Antes da Task B1:** `npm test` e `npm run typecheck` verdes. Confira que existem `src/contrato/agente.ts`,
   `src/contrato/servidorHttp.ts`, `tests/helpers/bateriaContrato.ts` e `tests/helpers/llmRoteirizado.ts`; se faltar
