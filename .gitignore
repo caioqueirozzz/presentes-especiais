@@ -6,3 +6,8 @@ logs/
 data/
 .superpowers
 .wwebjs_cache/
+benchmark-vetorizacao/imagens/
+benchmark-vetorizacao/saida/
+benchmark-vetorizacao/.venv/
+benchmark-vetorizacao/modelos/
+benchmark-vetorizacao/saida-v2/

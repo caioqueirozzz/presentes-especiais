@@ -1,0 +1,6 @@
+{
+  "camisa-1.jpg": [
+    { "nome": "escudo", "caixa": [0.56, 0.24, 0.14, 0.13], "cores": 4 },
+    { "nome": "patrocinador", "caixa": [0.30, 0.45, 0.40, 0.10], "cores": 3 }
+  ]
+}

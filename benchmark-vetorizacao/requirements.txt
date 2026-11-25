@@ -1,0 +1,13 @@
+# Versões testadas no Python 3.9 (Mac M1)
+numpy==2.0.2
+pillow==11.3.0
+scipy==1.13.1
+scikit-learn==1.6.1
+vtracer==0.6.15
+# Só para o pipeline v2 (extrair.py / sondar_florence.py)
+torch==2.8.0
+torchvision==0.23.0
+transformers==4.46.3
+timm==1.0.30
+einops==0.8.2
+spandrel==0.4.1

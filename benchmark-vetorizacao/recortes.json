@@ -1,0 +1,17 @@
+{
+  "camisa-1-cto.png": [
+    { "nome": "logo DC TECH (zoom)", "caixa": [0.293, 0.791, 0.179, 0.098], "cores": 4 },
+    { "nome": "CTO + barra (zoom)", "caixa": [0.573, 0.795, 0.094, 0.092], "cores": 3 },
+    { "nome": "logo peito (na peça)", "caixa": [0.335, 0.228, 0.087, 0.048], "cores": 4 },
+    { "nome": "logo costas (na peça)", "caixa": [0.656, 0.093, 0.104, 0.050], "cores": 4 }
+  ],
+  "camisa-2-slogan.png": [
+    { "nome": "logo DC TECH (zoom)", "caixa": [0.309, 0.796, 0.153, 0.083], "cores": 4 },
+    { "nome": "slogan + barra (zoom)", "caixa": [0.560, 0.789, 0.124, 0.111], "cores": 3 }
+  ],
+  "bone.png": [
+    { "nome": "logo bordado (zoom)", "caixa": [0.062, 0.786, 0.270, 0.098], "cores": 4 },
+    { "nome": "logo frente (na peça)", "caixa": [0.171, 0.235, 0.262, 0.092], "cores": 4 },
+    { "nome": "emblema da fivela (metal)", "caixa": [0.810, 0.796, 0.059, 0.103], "cores": 4 }
+  ]
+}
